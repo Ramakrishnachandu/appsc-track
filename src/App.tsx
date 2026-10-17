@@ -1,5 +1,5 @@
-﻿import { useEffect, useState } from 'react'
-import { Box } from '@mui/material'
+import { useEffect, useState } from 'react'
+import { Box, Button, Card, CardContent, Typography } from '@mui/material'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AppSidebar, getNavItems } from './components/AppSidebar'
 import { AuthShell } from './components/AuthShell'
@@ -19,6 +19,35 @@ import {
 import './App.css'
 import { useAppStore } from './store/useAppStore'
 
+function NotFoundState() {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      navigate('/login', { replace: true })
+    }, 1400)
+
+    return () => window.clearTimeout(timeout)
+  }, [navigate])
+
+  return (
+    <div className="not-found-shell">
+      <Card className="not-found-card">
+        <CardContent className="not-found-card-content">
+          <Typography variant="h3" className="not-found-title">404</Typography>
+          <Typography variant="h5" className="not-found-heading">Page not found</Typography>
+          <Typography variant="body1" className="not-found-copy">
+            The page you are looking for does not exist or has been moved.
+          </Typography>
+          <Button variant="contained" onClick={() => navigate('/login', { replace: true })}>
+            Go to login
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 function App() {
   const { user, authMode, loading, error, setAuthMode, login, register, logout, hydrateSession } = useAppStore()
   const [name, setName] = useState('')
@@ -33,10 +62,25 @@ function App() {
   }, [hydrateSession])
 
   useEffect(() => {
-    if (user && location.pathname === '/') {
+    if (!user) {
+      if (location.pathname === '/') {
+        navigate('/login', { replace: true })
+      }
+      if (location.pathname !== '/login' && location.pathname !== '/register' && location.pathname !== '/') {
+        navigate('/login', { replace: true })
+      }
+      return
+    }
+
+    if (location.pathname === '/login' || location.pathname === '/register' || location.pathname === '/') {
       navigate('/dashboard', { replace: true })
     }
   }, [location.pathname, navigate, user])
+
+  const handleAuthModeChange = (nextMode: 'login' | 'register') => {
+    setAuthMode(nextMode)
+    navigate(nextMode === 'login' ? '/login' : '/register', { replace: false })
+  }
 
   const handleSubmit = async () => {
     try {
@@ -66,19 +110,46 @@ function App() {
 
   if (!user) {
     return (
-      <AuthShell
-        authMode={authMode}
-        name={name}
-        email={email}
-        password={password}
-        loading={loading}
-        error={error}
-        onAuthModeChange={setAuthMode}
-        onNameChange={setName}
-        onEmailChange={setEmail}
-        onPasswordChange={setPassword}
-        onSubmit={() => void handleSubmit()}
-      />
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            <AuthShell
+              authMode="login"
+              name={name}
+              email={email}
+              password={password}
+              loading={loading}
+              error={error}
+              onAuthModeChange={handleAuthModeChange}
+              onNameChange={setName}
+              onEmailChange={setEmail}
+              onPasswordChange={setPassword}
+              onSubmit={() => void handleSubmit()}
+            />
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            <AuthShell
+              authMode="register"
+              name={name}
+              email={email}
+              password={password}
+              loading={loading}
+              error={error}
+              onAuthModeChange={handleAuthModeChange}
+              onNameChange={setName}
+              onEmailChange={setEmail}
+              onPasswordChange={setPassword}
+              onSubmit={() => void handleSubmit()}
+            />
+          }
+        />
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<NotFoundState />} />
+      </Routes>
     )
   }
 
@@ -109,12 +180,15 @@ function App() {
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/notes" element={<NotesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/admin" element={user.role === 'admin' ? <Navigate to="/admin/content" replace /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/admin/content" element={user.role === 'admin' ? <AdminPage initialSection="content" /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/admin/mock-tests" element={user.role === 'admin' ? <AdminPage initialSection="mock" /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/admin/mock" element={user.role === 'admin' ? <Navigate to="/admin/mock-tests" replace /> : <Navigate to="/dashboard" replace />} />
             <Route
               path="/admin/*"
               element={user.role === 'admin' ? <AdminPage /> : <Navigate to="/dashboard" replace />}
             />
-            <Route path="/admin/content" element={user.role === 'admin' ? <AdminPage initialSection="content" /> : <Navigate to="/dashboard" replace />} />
-            <Route path="/admin/mock" element={user.role === 'admin' ? <AdminPage initialSection="mock" /> : <Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<NotFoundState />} />
           </Routes>
         </div>
       </main>

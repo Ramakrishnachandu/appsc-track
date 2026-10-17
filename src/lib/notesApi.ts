@@ -26,11 +26,27 @@ const NOTES_STORAGE_KEY = 'appsc_user_notes'
 
 const getLocalStorageKey = (userId: string) => `${NOTES_STORAGE_KEY}_${userId || 'demo-user'}`
 
+const isValidUuid = (value?: string | null): boolean => {
+  if (!value) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+const generateUuid = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 const normalizeNote = (record: Record<string, any> | null | undefined): UserNote | null => {
   if (!record) return null
 
   return {
-    id: String(record.id ?? `note-${Date.now()}`),
+    id: String(record.id ?? generateUuid()),
     userId: String(record.user_id ?? record.userId ?? 'demo-user'),
     subjectId: String(record.subject_id ?? record.subjectId ?? 'general-topic'),
     subjectName: String(record.subject_name ?? record.subjectName ?? 'General'),
@@ -84,9 +100,10 @@ export const saveUserNote = async (userId: string, payload: NotePayload): Promis
     ? (JSON.parse(window.localStorage.getItem(getLocalStorageKey(userId)) ?? '[]') as Record<string, any>[])
     : []
   const existingNote = existingNotes.find((item) => item.id === payload.id)
+  const noteId = isValidUuid(payload.id) ? (payload.id as string) : generateUuid()
 
   const nextNote: UserNote = {
-    id: payload.id ?? `note-${Date.now()}`,
+    id: noteId,
     userId,
     subjectId: payload.subjectId,
     subjectName: payload.subjectName,
@@ -118,7 +135,9 @@ export const saveUserNote = async (userId: string, payload: NotePayload): Promis
         .select()
         .single()
 
-      if (!error && data) {
+      if (error) {
+        console.error('Failed to save note to Supabase:', error)
+      } else if (data) {
         const mapped = normalizeNote(data)
         if (mapped) {
           const stored = await getUserNotes(userId)
@@ -129,15 +148,16 @@ export const saveUserNote = async (userId: string, payload: NotePayload): Promis
           return mapped
         }
       }
-    } catch {
-      // fallback below
+    } catch (err) {
+      console.error('Error in saveUserNote:', err)
     }
   }
 
   if (typeof window !== 'undefined') {
     const key = getLocalStorageKey(userId)
     const current = JSON.parse(window.localStorage.getItem(key) ?? '[]') as Record<string, any>[]
-    const existingIndex = current.findIndex((item) => item.id === nextNote.id)
+    // Replace by either old ID or new note ID
+    const existingIndex = current.findIndex((item) => item.id === payload.id || item.id === nextNote.id)
 
     if (existingIndex >= 0) {
       current[existingIndex] = nextNote
@@ -154,18 +174,14 @@ export const saveUserNote = async (userId: string, payload: NotePayload): Promis
 export const deleteUserNote = async (userId: string, noteId: string): Promise<boolean> => {
   if (supabase && userId && userId !== 'demo-user') {
     try {
-      const { error } = await supabase.from('notes').delete().eq('id', noteId).eq('user_id', userId)
-      if (!error) {
-        if (typeof window !== 'undefined') {
-          const key = getLocalStorageKey(userId)
-          const current = JSON.parse(localStorage.getItem(key) ?? '[]') as Record<string, any>[]
-          const next = current.filter((note) => note.id !== noteId)
-          localStorage.setItem(key, JSON.stringify(next))
+      if (isValidUuid(noteId)) {
+        const { error } = await supabase.from('notes').delete().eq('id', noteId).eq('user_id', userId)
+        if (error) {
+          console.error('Failed to delete note from Supabase:', error)
         }
-        return true
       }
-    } catch {
-      // fallback below
+    } catch (err) {
+      console.error('Error in deleteUserNote:', err)
     }
   }
 

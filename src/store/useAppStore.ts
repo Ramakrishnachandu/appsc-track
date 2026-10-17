@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { getDemoUser, getDemoUsers, getUserDashboard, saveUserDashboard, setDemoUsers } from '../lib/demoData'
-import { getExamCountdown } from '../data/dashboardData'
+import { getExamCountdown, hydrateSyllabusConfigFromSupabase } from '../data/dashboardData'
 import type { AppUser, DashboardState } from '../types/auth'
 
 type AuthMode = 'login' | 'register'
@@ -36,6 +36,22 @@ const toUser = (name: string, email: string, id: string, role: AppUser['role'] =
 const resolveUserRole = (value?: string): AppUser['role'] => {
   if (value === 'admin') return 'admin'
   return 'user'
+}
+
+const getProfileRole = async (userId: string): Promise<AppUser['role']> => {
+  if (!supabase) return 'user'
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (error || !data?.role) {
+    return 'user'
+  }
+
+  return resolveUserRole(data.role)
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -75,15 +91,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
 
+    const userId = data.session.user.id
+    const profileRole = await getProfileRole(userId)
+    const resolvedRole = resolveUserRole(
+      profileRole === 'admin' ? 'admin' : (data.session.user.user_metadata?.role || data.session.user.app_metadata?.role),
+    )
+
     const activeUser = toUser(
       data.session.user.user_metadata?.full_name || data.session.user.email?.split('@')[0] || 'Student',
       data.session.user.email || '',
-      data.session.user.id,
-      resolveUserRole(data.session.user.user_metadata?.role || data.session.user.app_metadata?.role),
+      userId,
+      resolvedRole === 'admin' ? 'admin' : profileRole,
     )
 
     localStorage.setItem('appsc_active_user', JSON.stringify(activeUser))
     set({ user: activeUser, dashboard: getUserDashboard(activeUser) })
+    void hydrateSyllabusConfigFromSupabase()
   },
 
   login: async ({ email, password }) => {
@@ -106,16 +129,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
 
+      const profileRole = await getProfileRole(data.user.id)
       const user = toUser(
         data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'Student',
         data.user.email || '',
         data.user.id,
-        resolveUserRole(data.user.user_metadata?.role || data.user.app_metadata?.role),
+        profileRole,
       )
 
       const dashboard = getUserDashboard(user)
       localStorage.setItem('appsc_active_user', JSON.stringify(user))
       set({ user, dashboard, loading: false, error: null })
+      void hydrateSyllabusConfigFromSupabase()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Authentication failed.'
       set({ loading: false, error: message })
@@ -158,11 +183,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (error) throw error
 
+      const profileRole = data.user?.id ? await getProfileRole(data.user.id) : 'user'
       const user = toUser(
         name || data.user?.email?.split('@')[0] || 'Student',
         data.user?.email || email,
         data.user?.id || crypto.randomUUID(),
-        'user',
+        profileRole,
       )
 
       localStorage.setItem('appsc_active_user', JSON.stringify(user))

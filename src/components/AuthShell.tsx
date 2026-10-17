@@ -1,4 +1,6 @@
-import { Button, Card, CardContent, TextField, Typography } from '@mui/material'
+import { useState } from 'react'
+import { Button, Card, CardContent, IconButton, InputAdornment, TextField, Typography } from '@mui/material'
+import { Visibility, VisibilityOff } from '@mui/icons-material'
 import appscLogo from '../assets/appsc-logo.svg'
 
 type AuthShellProps = {
@@ -28,6 +30,8 @@ export function AuthShell({
   onPasswordChange,
   onSubmit,
 }: AuthShellProps) {
+  const [showPassword, setShowPassword] = useState(false)
+
   return (
     <div className="auth-shell">
       <div className="auth-panel">
@@ -85,11 +89,25 @@ export function AuthShell({
 
               <TextField
                 label="Password"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(event) => onPasswordChange(event.target.value)}
                 fullWidth
                 margin="normal"
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        aria-label="toggle password visibility"
+                        edge="end"
+                        onClick={() => setShowPassword((value) => !value)}
+                        onMouseDown={(event) => event.preventDefault()}
+                      >
+                        {showPassword ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
               />
 
               {error && (
@@ -105,7 +123,10 @@ export function AuthShell({
               <Button
                 variant="text"
                 className="switch-auth-btn"
-                onClick={() => onAuthModeChange(authMode === 'login' ? 'register' : 'login')}
+                onClick={() => {
+                  setShowPassword(false)
+                  onAuthModeChange(authMode === 'login' ? 'register' : 'login')
+                }}
               >
                 {authMode === 'login' ? 'Need an account? Register' : 'Already have an account? Login'}
               </Button>

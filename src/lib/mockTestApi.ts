@@ -224,23 +224,45 @@ const normalizeMockTest = (test: Partial<MockTest> | null | undefined): MockTest
   }
 }
 
+const isValidUuid = (value?: string | null): boolean => {
+  if (!value) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+const generateUuid = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 export const publishMockTestToApi = async (test: MockTest): Promise<MockTest> => {
+  const targetId = isValidUuid(test.id) ? test.id : generateUuid()
+  const normalizedTest: MockTest = {
+    ...test,
+    id: targetId,
+  }
+
   if (supabase) {
     try {
       const { data: sessionData } = await supabase.auth.getSession()
       const userId = sessionData.session?.user?.id
 
       const payload = {
-        id: test.id,
-        title: test.title,
-        schedule: test.schedule,
-        paper_type: test.paperType,
-        subject_id: test.subjectId ?? null,
-        subject_name: test.subjectName ?? null,
-        duration_minutes: test.durationMinutes,
-        questions: test.questions,
+        id: targetId,
+        title: normalizedTest.title,
+        schedule: normalizedTest.schedule,
+        paper_type: normalizedTest.paperType,
+        subject_id: normalizedTest.subjectId ?? null,
+        subject_name: normalizedTest.subjectName ?? null,
+        duration_minutes: normalizedTest.durationMinutes,
+        questions: normalizedTest.questions,
         created_by: userId ?? null,
-        created_at: test.createdAt,
+        created_at: normalizedTest.createdAt,
       }
 
       const { data, error } = await supabase.from('mock_tests').upsert(payload, { onConflict: 'id' }).select().single()
@@ -249,7 +271,7 @@ export const publishMockTestToApi = async (test: MockTest): Promise<MockTest> =>
         const mapped = mapDbTest(data)
         if (mapped) {
           const current = getStoredMockTests()
-          const next = [mapped, ...current.filter((item) => item.id !== mapped.id)].slice(0, 20)
+          const next = [mapped, ...current.filter((item) => item.id !== mapped.id && item.id !== test.id)].slice(0, 20)
           saveStoredMockTests(next)
           return mapped
         }
@@ -260,9 +282,9 @@ export const publishMockTestToApi = async (test: MockTest): Promise<MockTest> =>
   }
 
   const current = getStoredMockTests()
-  const next = [test, ...current.filter((item) => item.id !== test.id)]
+  const next = [normalizedTest, ...current.filter((item) => item.id !== normalizedTest.id && item.id !== test.id)]
   saveStoredMockTests(next)
-  return test
+  return normalizedTest
 }
 
 export const updateMockTestToApi = async (test: MockTest): Promise<MockTest> => publishMockTestToApi(test)
@@ -270,11 +292,15 @@ export const updateMockTestToApi = async (test: MockTest): Promise<MockTest> => 
 export const deleteMockTestFromApi = async (testId: string): Promise<boolean> => {
   if (supabase) {
     try {
-      const { error } = await supabase.from('mock_tests').delete().eq('id', testId)
-      if (!error) {
-        const current = getStoredMockTests()
-        saveStoredMockTests(current.filter((item) => item.id !== testId))
-        return true
+      if (isValidUuid(testId)) {
+        const { error } = await supabase.from('mock_tests').delete().eq('id', testId)
+        if (error) {
+          console.error('Failed to delete mock test from Supabase:', error)
+        } else {
+          const current = getStoredMockTests()
+          saveStoredMockTests(current.filter((item) => item.id !== testId))
+          return true
+        }
       }
     } catch {
       // fallback below
@@ -311,7 +337,7 @@ export const submitMockTestToApi = async ({ testId, answers, userId }: MockApiSu
   const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0
   const submittedAt = new Date().toISOString()
 
-  if (supabase) {
+  if (supabase && isValidUuid(test.id)) {
     try {
       const { data: sessionData } = await supabase.auth.getSession()
       const payloadUserId = userId ?? sessionData.session?.user?.id ?? null

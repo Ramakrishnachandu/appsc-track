@@ -262,11 +262,9 @@ export const getConfiguredSyllabusData = (): SyllabusConfig => {
   }
 }
 
-export const hydrateSyllabusConfigFromSupabase = async (): Promise<SyllabusConfig> => {
-  const fallback = getConfiguredSyllabusData()
-
+export const fetchRealAppContentSyllabus = async (): Promise<SyllabusConfig | null> => {
   if (!supabase) {
-    return fallback
+    return null
   }
 
   try {
@@ -276,20 +274,42 @@ export const hydrateSyllabusConfigFromSupabase = async (): Promise<SyllabusConfi
       .eq('key', 'syllabus_config')
       .maybeSingle()
 
-    if (error && error.code !== 'PGRST116') {
-      return fallback
+    if (error) {
+      console.warn('Real API app_content syllabus fetch error:', error)
+      return null
     }
 
-    const next = normalizeSyllabusConfig((data?.content as Partial<SyllabusConfig>) ?? null)
+    if (data?.content) {
+      const content = data.content as Partial<SyllabusConfig>
+      const realPrelims = Array.isArray(content.prelimsSubjects) ? content.prelimsSubjects : []
+      const realMains = Array.isArray(content.mainsSubjects) ? content.mainsSubjects : []
 
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(SYLLABUS_STORAGE_KEY, JSON.stringify(next))
+      if (realPrelims.length > 0 || realMains.length > 0) {
+        const realConfig: SyllabusConfig = {
+          prelimsSubjects: realPrelims,
+          mainsSubjects: realMains,
+        }
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(SYLLABUS_STORAGE_KEY, JSON.stringify(realConfig))
+        }
+        return realConfig
+      }
     }
 
-    return next
-  } catch {
-    return fallback
+    return null
+  } catch (err) {
+    console.error('Exception fetching real app_content from Supabase:', err)
+    return null
   }
+}
+
+export const hydrateSyllabusConfigFromSupabase = async (): Promise<SyllabusConfig> => {
+  const realApiData = await fetchRealAppContentSyllabus()
+  if (realApiData) {
+    return realApiData
+  }
+
+  return getConfiguredSyllabusData()
 }
 
 export const saveSyllabusData = async (data: SyllabusConfig) => {
