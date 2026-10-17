@@ -15,28 +15,38 @@ const defaultDashboard: DashboardState = {
   examCountdown: getExamCountdown(),
 }
 
-export const getDemoUsers = (): Array<{ id: string; name: string; email: string; password: string }> => {
+export const getDemoUsers = (): Array<{ id: string; name: string; email: string; password: string; role: 'user' | 'admin' }> => {
   const raw = localStorage.getItem(demoUsersKey)
 
   if (!raw) {
-    const seeded = [{
-      id: 'demo-user-1',
-      name: 'Demo Student',
-      email: 'demo@student.com',
-      password: 'demo123',
-    }]
+    const seeded = [
+      {
+        id: 'demo-user-1',
+        name: 'Demo Student',
+        email: 'demo@student.com',
+        password: 'demo123',
+        role: 'user' as const,
+      },
+      {
+        id: 'demo-admin-1',
+        name: 'Demo Admin',
+        email: 'admin@appsc.com',
+        password: 'admin123',
+        role: 'admin' as const,
+      },
+    ]
     localStorage.setItem(demoUsersKey, JSON.stringify(seeded))
     return seeded
   }
 
   try {
-    return JSON.parse(raw) as Array<{ id: string; name: string; email: string; password: string }>
+    return JSON.parse(raw) as Array<{ id: string; name: string; email: string; password: string; role: 'user' | 'admin' }>
   } catch {
     return []
   }
 }
 
-export const setDemoUsers = (users: Array<{ id: string; name: string; email: string; password: string }>) => {
+export const setDemoUsers = (users: Array<{ id: string; name: string; email: string; password: string; role: 'user' | 'admin' }>) => {
   localStorage.setItem(demoUsersKey, JSON.stringify(users))
 }
 

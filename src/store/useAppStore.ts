@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { getDemoUser, getDemoUsers, getUserDashboard, saveUserDashboard, setDemoUsers } from '../lib/demoData'
-import { getExamCountdown } from '../data/dashboardData'
+import { getExamCountdown, hydrateSyllabusConfigFromSupabase } from '../data/dashboardData'
 import type { AppUser, DashboardState } from '../types/auth'
 
 type AuthMode = 'login' | 'register'
@@ -31,7 +31,28 @@ type AppState = {
   updateDashboard: (next: DashboardState) => void
 }
 
-const toUser = (name: string, email: string, id: string): AppUser => ({ id, name, email })
+const toUser = (name: string, email: string, id: string, role: AppUser['role'] = 'user'): AppUser => ({ id, name, email, role })
+
+const resolveUserRole = (value?: string): AppUser['role'] => {
+  if (value === 'admin') return 'admin'
+  return 'user'
+}
+
+const getProfileRole = async (userId: string): Promise<AppUser['role']> => {
+  if (!supabase) return 'user'
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (error || !data?.role) {
+    return 'user'
+  }
+
+  return resolveUserRole(data.role)
+}
 
 export const useAppStore = create<AppState>((set, get) => ({
   user: null,
@@ -50,8 +71,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       try {
-        const signedInUser = JSON.parse(stored) as AppUser
-        set({ user: signedInUser, dashboard: getUserDashboard(signedInUser) })
+        const signedInUser = JSON.parse(stored) as Partial<AppUser>
+        const normalisedUser: AppUser = {
+          id: signedInUser.id || 'demo-user',
+          name: signedInUser.name || 'Student',
+          email: signedInUser.email || 'student@appsc.com',
+          role: resolveUserRole(signedInUser.role),
+        }
+        set({ user: normalisedUser, dashboard: getUserDashboard(normalisedUser) })
       } catch {
         set({ user: null, dashboard: defaultDashboard })
       }
@@ -64,13 +91,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
 
+    const userId = data.session.user.id
+    const profileRole = await getProfileRole(userId)
+    const resolvedRole = resolveUserRole(
+      profileRole === 'admin' ? 'admin' : (data.session.user.user_metadata?.role || data.session.user.app_metadata?.role),
+    )
+
     const activeUser = toUser(
       data.session.user.user_metadata?.full_name || data.session.user.email?.split('@')[0] || 'Student',
       data.session.user.email || '',
-      data.session.user.id,
+      userId,
+      resolvedRole === 'admin' ? 'admin' : profileRole,
     )
 
-    set({ user: activeUser, dashboard: defaultDashboard })
+    localStorage.setItem('appsc_active_user', JSON.stringify(activeUser))
+    set({ user: activeUser, dashboard: getUserDashboard(activeUser) })
+    void hydrateSyllabusConfigFromSupabase()
   },
 
   login: async ({ email, password }) => {
@@ -83,7 +119,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           throw new Error('Invalid email or password.')
         }
 
-        const user = toUser(existing.name, existing.email, existing.id)
+        const user = toUser(existing.name, existing.email, existing.id, existing.role)
         const dashboard = getUserDashboard(user)
         localStorage.setItem('appsc_active_user', JSON.stringify(user))
         set({ user, dashboard, loading: false, error: null })
@@ -93,14 +129,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
 
+      const profileRole = await getProfileRole(data.user.id)
       const user = toUser(
         data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'Student',
         data.user.email || '',
         data.user.id,
+        profileRole,
       )
 
-      set({ user, loading: false, error: null, dashboard: defaultDashboard })
-      return
+      const dashboard = getUserDashboard(user)
+      localStorage.setItem('appsc_active_user', JSON.stringify(user))
+      set({ user, dashboard, loading: false, error: null })
+      void hydrateSyllabusConfigFromSupabase()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Authentication failed.'
       set({ loading: false, error: message })
@@ -119,12 +159,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           throw new Error('User already exists. Please log in instead.')
         }
 
-        const newUser = { id: `demo-${Date.now()}`, name, email, password }
+        const newUser = { id: `demo-${Date.now()}`, name, email, password, role: 'user' as const }
         users.push(newUser)
         setDemoUsers(users)
-        const user = toUser(name, email, newUser.id)
-        localStorage.setItem('appsc_active_user', JSON.stringify(user))
+
+        const user = toUser(name, email, newUser.id, 'user')
         const dashboard = getUserDashboard(user)
+        localStorage.setItem('appsc_active_user', JSON.stringify(user))
         set({ user, dashboard, loading: false, error: null })
         return
       }
@@ -135,20 +176,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         options: {
           data: {
             full_name: name,
+            role: 'user',
           },
         },
       })
 
       if (error) throw error
 
+      const profileRole = data.user?.id ? await getProfileRole(data.user.id) : 'user'
       const user = toUser(
         name || data.user?.email?.split('@')[0] || 'Student',
         data.user?.email || email,
         data.user?.id || crypto.randomUUID(),
+        profileRole,
       )
 
+      localStorage.setItem('appsc_active_user', JSON.stringify(user))
       set({ user, loading: false, error: null, dashboard: defaultDashboard })
-      return
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Registration failed.'
       set({ loading: false, error: message })
