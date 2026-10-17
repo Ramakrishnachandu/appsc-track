@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Box, Button, Card, CardContent, TextField } from '@mui/material'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   getConfiguredSyllabusData,
   type MockPaperType,
@@ -17,20 +17,51 @@ import {
 } from '../lib/mockTestApi'
 import {
   getStoredMockTests,
+  hydrateSyllabusConfigFromSupabase,
   resetSyllabusData,
   saveSyllabusData,
   saveStoredMockTests,
 } from '../data/dashboardData'
 
-export function AdminPage({ initialSection = 'content' }: { initialSection?: 'content' | 'mock' }) {
+export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mock' }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  const resolvedSection: 'content' | 'mock' =
+    initialSection ?? (location.pathname.includes('/mock') ? 'mock' : 'content')
+
+  const [adminSection, setAdminSection] = useState<'content' | 'mock'>(resolvedSection)
+
+  useEffect(() => {
+    if (location.pathname.includes('/mock')) {
+      setAdminSection('mock')
+    } else if (location.pathname.includes('/content')) {
+      setAdminSection('content')
+    }
+  }, [location.pathname])
+
   const defaultConfig = getConfiguredSyllabusData()
   const [config, setConfig] = useState(defaultConfig)
+
+  useEffect(() => {
+    let isMounted = true
+    const syncRealApiContent = async () => {
+      const live = await hydrateSyllabusConfigFromSupabase()
+      if (isMounted && live && (live.prelimsSubjects.length > 0 || live.mainsSubjects.length > 0)) {
+        setConfig(live)
+      }
+    }
+    void syncRealApiContent()
+    return () => {
+      isMounted = false
+    }
+  }, [])
   const [selectedSubjectId, setSelectedSubjectId] = useState(defaultConfig.prelimsSubjects[0]?.id || '')
   const [statusMessage, setStatusMessage] = useState('')
   const [mockTests, setMockTests] = useState<MockTest[]>(() => getStoredMockTests())
   const [draftTests, setDraftTests] = useState<MockTest[]>(() => getStoredMockDrafts())
   const [editingTestId, setEditingTestId] = useState<string | null>(null)
-  const [adminSection, setAdminSection] = useState<'content' | 'mock'>(initialSection)
+  // const [adminSection, setAdminSection] = useState<'content' | 'mock'>(initialSection)
 
   type DraftQuestion = {
     prompt: string
@@ -131,8 +162,19 @@ export function AdminPage({ initialSection = 'content' }: { initialSection?: 'co
         count: draftTest.count,
       })
 
+    const generateId = () => {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID()
+      }
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0
+        const v = c === 'x' ? r : (r & 0x3) | 0x8
+        return v.toString(16)
+      })
+    }
+
     return {
-      id: editingTestId ?? `mock-${Date.now()}`,
+      id: editingTestId ?? generateId(),
       title: draftTest.title || `${draftTest.paperType} ${selectedSubject.name} Test`,
       schedule: draftTest.schedule,
       durationMinutes: draftTest.durationMinutes,
@@ -213,6 +255,7 @@ export function AdminPage({ initialSection = 'content' }: { initialSection?: 'co
       explanation: question.explanation,
     })))
     setAdminSection('mock')
+    navigate('/admin/mock-tests')
     setStatusMessage(`Editing ${test.title}. Update changes and publish when ready.`)
   }
 
@@ -264,17 +307,63 @@ export function AdminPage({ initialSection = 'content' }: { initialSection?: 'co
     }))
   }
 
-  const updateTopics = (value: string) => {
+  const [newTopicText, setNewTopicText] = useState('')
+  const [bulkMode, setBulkMode] = useState(false)
+  const [bulkText, setBulkText] = useState('')
+
+  const updateAllTopics = (nextTopics: string[]) => {
     if (!selectedSubject) return
 
     setConfig((current) => ({
       prelimsSubjects: current.prelimsSubjects.map((subject) =>
-        subject.id === selectedSubject.id ? { ...subject, topics: value.split('\n').map((line) => line.trim()).filter(Boolean) } : subject,
+        subject.id === selectedSubject.id ? { ...subject, topics: nextTopics } : subject,
       ),
       mainsSubjects: current.mainsSubjects.map((subject) =>
-        subject.id === selectedSubject.id ? { ...subject, topics: value.split('\n').map((line) => line.trim()).filter(Boolean) } : subject,
+        subject.id === selectedSubject.id ? { ...subject, topics: nextTopics } : subject,
       ),
     }))
+  }
+
+  const handleAddTopicCard = () => {
+    const trimmed = newTopicText.trim()
+    if (!trimmed || !selectedSubject) return
+    updateAllTopics([...selectedSubject.topics, trimmed])
+    setNewTopicText('')
+  }
+
+  const handleBulkAddTopics = () => {
+    if (!bulkText.trim() || !selectedSubject) return
+    const rawBlocks = bulkText.includes('\n\n')
+      ? bulkText.split(/\n\s*\n/)
+      : bulkText.split('\n')
+    const parsed = rawBlocks.map((b) => b.trim()).filter(Boolean)
+    if (parsed.length === 0) return
+    updateAllTopics([...selectedSubject.topics, ...parsed])
+    setBulkText('')
+    setBulkMode(false)
+  }
+
+  const handleUpdateTopic = (index: number, value: string) => {
+    if (!selectedSubject) return
+    const updated = [...selectedSubject.topics]
+    updated[index] = value
+    updateAllTopics(updated)
+  }
+
+  const handleDeleteTopic = (index: number) => {
+    if (!selectedSubject) return
+    const updated = selectedSubject.topics.filter((_, i) => i !== index)
+    updateAllTopics(updated)
+  }
+
+  const handleMoveTopic = (index: number, direction: 'up' | 'down') => {
+    if (!selectedSubject) return
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+    if (targetIndex < 0 || targetIndex >= selectedSubject.topics.length) return
+    const updated = [...selectedSubject.topics]
+    const [item] = updated.splice(index, 1)
+    updated.splice(targetIndex, 0, item)
+    updateAllTopics(updated)
   }
 
   const handleSave = async () => {
@@ -297,14 +386,14 @@ export function AdminPage({ initialSection = 'content' }: { initialSection?: 'co
 
           <NavLink
             to="/admin/content"
-            className={({ isActive }) => (isActive || adminSection === 'content' ? 'admin-subnav-item active' : 'admin-subnav-item')}
+            className={() => (adminSection === 'content' ? 'admin-subnav-item active' : 'admin-subnav-item')}
           >
             Subjects Content configuration
           </NavLink>
 
           <NavLink
             to="/admin/mock-tests"
-            className={({ isActive }) => (isActive || adminSection === 'mock' ? 'admin-subnav-item active' : 'admin-subnav-item')}
+            className={() => (adminSection === 'mock' ? 'admin-subnav-item active' : 'admin-subnav-item')}
           >
             Mock test manager
           </NavLink>
@@ -390,15 +479,157 @@ export function AdminPage({ initialSection = 'content' }: { initialSection?: 'co
                         margin="normal"
                       />
 
-                      <TextField
-                        label="Study focus topics (one per line)"
-                        value={selectedSubject.topics.join('\n')}
-                        onChange={(event) => updateTopics(event.target.value)}
-                        fullWidth
-                        multiline
-                        rows={10}
-                        margin="normal"
-                      />
+                      <div className="admin-topics-manager">
+                        <div className="admin-topics-header">
+                          <div>
+                            <h3>Study focus topic cards</h3>
+                            <p className="admin-topics-subtitle">
+                              Add more cards for this subject. Paste any text (paragraphs, points, notes) in the input field below. Each card renders the text exactly as pasted.
+                            </p>
+                          </div>
+                          <div className="admin-topics-badge">
+                            {selectedSubject.topics.length} {selectedSubject.topics.length === 1 ? 'card' : 'cards'}
+                          </div>
+                        </div>
+
+                        {/* Add new card box */}
+                        <div className="admin-add-card-box">
+                          <div className="admin-add-card-header">
+                            <span className="admin-add-card-title">Add study focus topic card</span>
+                            <Button
+                              size="small"
+                              variant="text"
+                              onClick={() => setBulkMode(!bulkMode)}
+                            >
+                              {bulkMode ? 'Switch to single card' : 'Bulk paste multiple cards'}
+                            </Button>
+                          </div>
+
+                          {bulkMode ? (
+                            <div className="admin-bulk-input-block">
+                              <TextField
+                                label="Paste multiple topics (separated by empty line or newline)"
+                                placeholder="Topic 1 content...&#10;&#10;Topic 2 content...&#10;&#10;Topic 3 content..."
+                                value={bulkText}
+                                onChange={(e) => setBulkText(e.target.value)}
+                                fullWidth
+                                multiline
+                                rows={5}
+                                margin="dense"
+                              />
+                              <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                                <Button
+                                  variant="contained"
+                                  size="small"
+                                  onClick={handleBulkAddTopics}
+                                  disabled={!bulkText.trim()}
+                                >
+                                  Add All As Cards
+                                </Button>
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  onClick={() => setBulkMode(false)}
+                                >
+                                  Cancel
+                                </Button>
+                              </Box>
+                            </div>
+                          ) : (
+                            <div className="admin-single-input-block">
+                              <TextField
+                                label="Paste or type study focus topic text"
+                                placeholder="Paste syllabus topic, notes, points, or paragraph here... Each card renders this text exactly as pasted."
+                                value={newTopicText}
+                                onChange={(e) => setNewTopicText(e.target.value)}
+                                fullWidth
+                                multiline
+                                rows={3}
+                                margin="dense"
+                                onKeyDown={(e) => {
+                                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                    e.preventDefault()
+                                    handleAddTopicCard()
+                                  }
+                                }}
+                              />
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
+                                <span className="admin-field-hint">Tip: Press Ctrl + Enter to quickly add this card</span>
+                                <Button
+                                  variant="contained"
+                                  onClick={handleAddTopicCard}
+                                  disabled={!newTopicText.trim()}
+                                >
+                                  + Add Topic Card
+                                </Button>
+                              </Box>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Existing cards list */}
+                        <div className="admin-cards-list">
+                          {selectedSubject.topics.length === 0 ? (
+                            <div className="admin-cards-empty">
+                              No study focus topic cards added yet. Paste text in the input field above and click <strong>+ Add Topic Card</strong>.
+                            </div>
+                          ) : (
+                            selectedSubject.topics.map((topic, index) => (
+                              <div key={index} className="admin-topic-card-item">
+                                <div className="admin-topic-card-topbar">
+                                  <span className="admin-topic-card-number">Card #{index + 1}</span>
+                                  <div className="admin-topic-card-controls">
+                                    <Button
+                                      size="small"
+                                      disabled={index === 0}
+                                      onClick={() => handleMoveTopic(index, 'up')}
+                                      title="Move up"
+                                      sx={{ minWidth: 32, px: 1 }}
+                                    >
+                                      ▲
+                                    </Button>
+                                    <Button
+                                      size="small"
+                                      disabled={index === selectedSubject.topics.length - 1}
+                                      onClick={() => handleMoveTopic(index, 'down')}
+                                      title="Move down"
+                                      sx={{ minWidth: 32, px: 1 }}
+                                    >
+                                      ▼
+                                    </Button>
+                                    <Button
+                                      size="small"
+                                      color="error"
+                                      onClick={() => handleDeleteTopic(index)}
+                                      title="Delete this card"
+                                    >
+                                      Delete
+                                    </Button>
+                                  </div>
+                                </div>
+
+                                <TextField
+                                  label={`Card #${index + 1} Text`}
+                                  value={topic}
+                                  onChange={(e) => handleUpdateTopic(index, e.target.value)}
+                                  fullWidth
+                                  multiline
+                                  rows={Math.min(Math.max(2, topic.split('\n').length), 6)}
+                                  margin="dense"
+                                />
+
+                                <div className="admin-topic-card-preview-wrapper">
+                                  <span className="admin-preview-label">Rendered Card Preview:</span>
+                                  <div className="admin-card-preview-box">
+                                    <span className="topic-dot" />
+                                    <div className="topic-card-content">{topic || <em>Empty card</em>}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
                     </>
                   )}
                 </div>

@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { Box, Card, CardContent, LinearProgress } from '@mui/material'
-import { getConfiguredSyllabusData } from '../data/dashboardData'
+import { Box, Card, CardContent, CircularProgress, LinearProgress } from '@mui/material'
+import {
+  getConfiguredSyllabusData,
+  hydrateSyllabusConfigFromSupabase,
+  type SyllabusConfig,
+} from '../data/dashboardData'
 import { getUserSubjectProgress } from '../lib/userProgress'
 import { useAppStore } from '../store/useAppStore'
 
 export function SubjectsPage() {
   const { user } = useAppStore()
-  const { prelimsSubjects: configuredPrelims, mainsSubjects: configuredMains } = getConfiguredSyllabusData()
+  const [syllabusConfig, setSyllabusConfig] = useState<SyllabusConfig>(() => getConfiguredSyllabusData())
+  const [loadingRealApi, setLoadingRealApi] = useState(true)
+
+  const configuredPrelims = syllabusConfig.prelimsSubjects
+  const configuredMains = syllabusConfig.mainsSubjects
   const allSubjects = [...configuredPrelims, ...configuredMains]
   const liveProgress = getUserSubjectProgress(user?.id ?? 'demo-user', allSubjects)
   const subjectGroups = [
@@ -17,6 +25,36 @@ export function SubjectsPage() {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(allSubjects[0]?.id ?? null)
   const [activeFilter, setActiveFilter] = useState<'All' | 'Prelims' | 'Mains'>('All')
   const detailRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadRealApiContent = async () => {
+      try {
+        setLoadingRealApi(true)
+        const realConfig = await hydrateSyllabusConfigFromSupabase()
+        if (isMounted && realConfig && (realConfig.prelimsSubjects.length > 0 || realConfig.mainsSubjects.length > 0)) {
+          setSyllabusConfig(realConfig)
+          setSelectedSubjectId((prev) => {
+            const exists = [...realConfig.prelimsSubjects, ...realConfig.mainsSubjects].some((s) => s.id === prev)
+            return exists ? prev : (realConfig.prelimsSubjects[0]?.id ?? null)
+          })
+        }
+      } catch (err) {
+        console.error('Failed to load real API app content:', err)
+      } finally {
+        if (isMounted) {
+          setLoadingRealApi(false)
+        }
+      }
+    }
+
+    void loadRealApiContent()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const visibleGroups = subjectGroups.filter((group) => activeFilter === 'All' || group.title === activeFilter)
   const visibleSubjects = visibleGroups.flatMap((group) => group.items)
@@ -130,14 +168,25 @@ export function SubjectsPage() {
 
               <p className="subject-detail-summary">{selectedSubject.summary}</p>
 
-              <div className="subject-topic-list">
-                {selectedSubject.topics.map((topic) => (
-                  <div key={topic} className="subject-topic-item">
-                    <span className="topic-dot" />
-                    <span>{topic}</span>
-                  </div>
-                ))}
-              </div>
+              {loadingRealApi ? (
+                <div className="subject-topics-loading">
+                  <CircularProgress size={22} sx={{ color: '#2563eb' }} />
+                  <span>Loading real study focus topic cards from API...</span>
+                </div>
+              ) : selectedSubject.topics && selectedSubject.topics.length > 0 ? (
+                <div className="subject-topic-list">
+                  {selectedSubject.topics.map((topic, index) => (
+                    <div key={`${selectedSubject.id}-topic-${index}`} className="subject-topic-item">
+                      <span className="topic-dot" />
+                      <div className="topic-card-content">{topic}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="subject-topics-empty">
+                  No study focus topics found in real API content for this subject.
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
