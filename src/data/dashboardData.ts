@@ -40,6 +40,47 @@ export type SyllabusConfig = {
   mainsSubjects: SubjectItem[]
 }
 
+export type MockPaperType = 'Prelims' | 'Mains'
+
+export type MockQuestion = {
+  id: string
+  subjectId?: string
+  subjectName?: string
+  paperType?: MockPaperType
+  prompt: string
+  options: string[]
+  correctIndex: number
+  explanation: string
+}
+
+export type MockTest = {
+  id: string
+  title: string
+  schedule: 'Daily' | 'Weekly'
+  durationMinutes: number
+  createdAt: string
+  paperType: MockPaperType
+  subjectId?: string
+  subjectName?: string
+  source?: 'local' | 'api'
+  questions: MockQuestion[]
+}
+
+export type MockAttempt = {
+  id: string
+  testId: string
+  testTitle: string
+  score: number
+  total: number
+  correct?: number
+  wrong?: number
+  skipped?: number
+  accuracy?: number
+  paperType?: MockPaperType
+  subjectName?: string
+  submittedAt: string
+}
+
 export const defaultPrelimsSubjects: SubjectItem[] = [
   {
     id: 'indian-history',
@@ -288,6 +329,214 @@ export const resetSyllabusData = async () => {
   return defaults
 }
 
+const MOCK_TESTS_KEY = 'appsc_mock_tests'
+const MOCK_ATTEMPTS_KEY = 'appsc_mock_attempts'
+
+export const defaultMockTests: MockTest[] = [
+  {
+    id: 'mock-polity-prelims-1',
+    title: 'Indian Polity Daily Test',
+    schedule: 'Daily',
+    durationMinutes: 25,
+    createdAt: new Date().toISOString(),
+    paperType: 'Prelims',
+    subjectId: 'indian-society',
+    subjectName: 'Indian Society',
+    source: 'api',
+    questions: [
+      {
+        id: 'polity-q-1',
+        subjectId: 'indian-society',
+        subjectName: 'Indian Society',
+        paperType: 'Prelims',
+        prompt: 'Which Article of the Indian Constitution guarantees the right to equality before the law?',
+        options: ['Article 14', 'Article 19', 'Article 21', 'Article 32'],
+        correctIndex: 0,
+        explanation: 'Article 14 enshrines equality before the law and equal protection of the laws.',
+      },
+      {
+        id: 'polity-q-2',
+        subjectId: 'indian-society',
+        subjectName: 'Indian Society',
+        paperType: 'Prelims',
+        prompt: 'Who is the final interpreter of the Constitution?',
+        options: ['Parliament', 'President', 'Supreme Court', 'Election Commission'],
+        correctIndex: 2,
+        explanation: 'The Supreme Court of India is the final interpreter and guardian of the Constitution.',
+      },
+      {
+        id: 'polity-q-3',
+        subjectId: 'indian-society',
+        subjectName: 'Indian Society',
+        paperType: 'Prelims',
+        prompt: 'Which constitutional amendment introduced Panchayati Raj institutions?',
+        options: ['42nd Amendment', '44th Amendment', '73rd Amendment', '86th Amendment'],
+        correctIndex: 2,
+        explanation: 'The 73rd Constitutional Amendment gave constitutional status to Panchayati Raj institutions.',
+      },
+    ],
+  },
+  {
+    id: 'mock-economy-prelims-1',
+    title: 'Economy Weekly Test',
+    schedule: 'Weekly',
+    durationMinutes: 35,
+    createdAt: new Date().toISOString(),
+    paperType: 'Prelims',
+    subjectId: 'geography',
+    subjectName: 'Geography',
+    source: 'api',
+    questions: [
+      {
+        id: 'eco-q-1',
+        subjectId: 'geography',
+        subjectName: 'Geography',
+        paperType: 'Prelims',
+        prompt: 'What does GDP measure?',
+        options: ['Only final goods and services produced in the economy', 'Only exports', 'Only government spending', 'Only agricultural output'],
+        correctIndex: 0,
+        explanation: 'GDP measures the market value of all final goods and services produced within a country in a given period.',
+      },
+      {
+        id: 'eco-q-2',
+        subjectId: 'geography',
+        subjectName: 'Geography',
+        paperType: 'Prelims',
+        prompt: 'Which institution is primarily responsible for monetary policy in India?',
+        options: ['SEBI', 'RBI', 'NITI Aayog', 'Finance Ministry'],
+        correctIndex: 1,
+        explanation: 'The Reserve Bank of India formulates and implements the country’s monetary policy.',
+      },
+      {
+        id: 'eco-q-3',
+        subjectId: 'geography',
+        subjectName: 'Geography',
+        paperType: 'Prelims',
+        prompt: 'Which sector is the largest contributor to India’s GDP?',
+        options: ['Agriculture', 'Services', 'Manufacturing', 'Mining'],
+        correctIndex: 1,
+        explanation: 'The services sector is the dominant contributor to India’s GDP.',
+      },
+    ],
+  },
+  {
+    id: 'mock-constitution-mains-1',
+    title: 'Constitution Mains Test',
+    schedule: 'Weekly',
+    durationMinutes: 40,
+    createdAt: new Date().toISOString(),
+    paperType: 'Mains',
+    subjectId: 'indian-constitution',
+    subjectName: 'Paper I: Indian Constitution',
+    source: 'api',
+    questions: [
+      {
+        id: 'const-q-1',
+        subjectId: 'indian-constitution',
+        subjectName: 'Paper I: Indian Constitution',
+        paperType: 'Mains',
+        prompt: 'The basic structure doctrine was established in which case?',
+        options: ['Golaknath v. State of Punjab', 'Kesavananda Bharati v. State of Kerala', 'Minerva Mills v. Union of India', 'S.R. Bommai v. Union of India'],
+        correctIndex: 1,
+        explanation: 'Kesavananda Bharati is the landmark judgment that articulated the basic structure doctrine.',
+      },
+      {
+        id: 'const-q-2',
+        subjectId: 'indian-constitution',
+        subjectName: 'Paper I: Indian Constitution',
+        paperType: 'Mains',
+        prompt: 'Which Article provides for a Uniform Civil Code as a directive principle?',
+        options: ['Article 39', 'Article 44', 'Article 51A', 'Article 17'],
+        correctIndex: 1,
+        explanation: 'Article 44 directs the State to secure a Uniform Civil Code for the citizens.',
+      },
+      {
+        id: 'const-q-3',
+        subjectId: 'indian-constitution',
+        subjectName: 'Paper I: Indian Constitution',
+        paperType: 'Mains',
+        prompt: 'The concept of judicial review in India is rooted in:',
+        options: ['Directive Principles', 'Federalism', 'Rule of law', 'Parliamentary supremacy'],
+        correctIndex: 2,
+        explanation: 'Judicial review is a key feature of the rule of law and constitutional supremacy in India.',
+      },
+    ],
+  },
+]
+
+const normalizeMockTest = (test: Partial<MockTest> | null | undefined): MockTest | null => {
+  if (!test) return null
+
+  const fallbackPaperType = test.paperType === 'Mains' ? 'Mains' : 'Prelims'
+
+  return {
+    id: test.id ?? `mock-${Date.now()}`,
+    title: test.title ?? 'Mock test',
+    schedule: test.schedule === 'Weekly' ? 'Weekly' : 'Daily',
+    durationMinutes: Number(test.durationMinutes ?? 30),
+    createdAt: test.createdAt ?? new Date().toISOString(),
+    paperType: fallbackPaperType,
+    subjectId: test.subjectId ?? undefined,
+    subjectName: test.subjectName ?? undefined,
+    source: test.source ?? 'local',
+    questions: Array.isArray(test.questions) ? test.questions.map((question) => ({
+      id: question.id ?? `${test.id}-q-${Math.random()}`,
+      subjectId: question.subjectId ?? test.subjectId,
+      subjectName: question.subjectName ?? test.subjectName,
+      paperType: question.paperType ?? fallbackPaperType,
+      prompt: question.prompt ?? 'Sample question',
+      options: Array.isArray(question.options) && question.options.length ? question.options : ['Option A', 'Option B', 'Option C', 'Option D'],
+      correctIndex: Number(question.correctIndex ?? 0),
+      explanation: question.explanation ?? 'Answer explanation',
+    })) : [],
+  }
+}
+
+export const getStoredMockTests = (): MockTest[] => {
+  if (typeof window === 'undefined') {
+    return defaultMockTests
+  }
+
+  try {
+    const raw = window.localStorage.getItem(MOCK_TESTS_KEY)
+    if (!raw) {
+      window.localStorage.setItem(MOCK_TESTS_KEY, JSON.stringify(defaultMockTests))
+      return defaultMockTests
+    }
+
+    const parsed = JSON.parse(raw) as Partial<MockTest>[]
+    const normalized = parsed.map(normalizeMockTest).filter((item): item is MockTest => Boolean(item))
+    return normalized.length ? normalized : defaultMockTests
+  } catch {
+    return defaultMockTests
+  }
+}
+
+export const saveStoredMockTests = (tests: MockTest[]) => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(MOCK_TESTS_KEY, JSON.stringify(tests))
+  }
+}
+
+export const getStoredUserMockAttempts = (userId: string): MockAttempt[] => {
+  if (typeof window === 'undefined') return []
+
+  try {
+    const raw = window.localStorage.getItem(`${MOCK_ATTEMPTS_KEY}:${userId}`)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as MockAttempt[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+export const saveStoredUserMockAttempts = (userId: string, attempts: MockAttempt[]) => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(`${MOCK_ATTEMPTS_KEY}:${userId}`, JSON.stringify(attempts))
+  }
+}
+
 export const subjectProgress = [...defaultPrelimsSubjects, ...defaultMainsSubjects]
 
 export const weeklyHours = [
@@ -309,6 +558,108 @@ export const monthlyProgress = [
   { month: 'Jun', percent: 81 },
 ]
 
+export type MonthlyTrendPoint = {
+  month: string
+  percent: number
+  attempts: number
+}
+
+export type WeakArea = {
+  subject: string
+  accuracy: number
+  priority: 'High' | 'Medium' | 'Low'
+  action: string
+}
+
+export const getMonthlyPerformanceTrend = (userId: string): MonthlyTrendPoint[] => {
+  const attempts = getStoredUserMockAttempts(userId)
+
+  if (!attempts.length) {
+    return monthlyProgress.map((point) => ({ ...point, attempts: 0 }))
+  }
+
+  const monthMap = new Map<string, { total: number; count: number }>()
+
+  attempts.forEach((attempt) => {
+    const submittedDate = new Date(attempt.submittedAt)
+    const key = submittedDate.toLocaleString('en-US', { month: 'short' })
+    const total = Number(attempt.total ?? 0)
+    const score = Number(attempt.score ?? 0)
+
+    if (!monthMap.has(key)) {
+      monthMap.set(key, { total: 0, count: 0 })
+    }
+
+    const bucket = monthMap.get(key)!
+    bucket.total += total > 0 ? Math.round((score / total) * 100) : 0
+    bucket.count += 1
+  })
+
+  const months = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date()
+    date.setMonth(date.getMonth() - (5 - index))
+    return date.toLocaleString('en-US', { month: 'short' })
+  })
+
+  return months.map((month) => {
+    const bucket = monthMap.get(month)
+    const attemptsForMonth = bucket?.count ?? 0
+    const percent = bucket ? Math.round(bucket.total / Math.max(bucket.count, 1)) : 0
+
+    return {
+      month,
+      percent: Math.max(0, Math.min(100, percent || (attemptsForMonth ? 50 : 0))),
+      attempts: attemptsForMonth,
+    }
+  })
+}
+
+export const getWeakAreas = (userId: string): WeakArea[] => {
+  const attempts = getStoredUserMockAttempts(userId)
+
+  if (!attempts.length) {
+    return [
+      { subject: 'Economy', accuracy: 52, priority: 'High', action: 'Revise fiscal policy and GDP indicators' },
+      { subject: 'Science & Tech', accuracy: 58, priority: 'Medium', action: 'Practice recent scientific developments and applications' },
+      { subject: 'Current Affairs', accuracy: 61, priority: 'Medium', action: 'Revisit monthly government schemes and app updates' },
+    ]
+  }
+
+  const subjectMap = new Map<string, { total: number; score: number }>()
+
+  attempts.forEach((attempt) => {
+    const subjectKey = attempt.subjectName || 'General'
+    if (!subjectMap.has(subjectKey)) {
+      subjectMap.set(subjectKey, { total: 0, score: 0 })
+    }
+
+    const bucket = subjectMap.get(subjectKey)!
+    const total = Number(attempt.total ?? 0)
+    const score = Number(attempt.score ?? 0)
+    bucket.total += total
+    bucket.score += score
+  })
+
+  return Array.from(subjectMap.entries())
+    .map(([subject, metrics]): WeakArea => {
+      const accuracy = metrics.total ? Math.round((metrics.score / metrics.total) * 100) : 0
+      const priority: WeakArea['priority'] = accuracy < 60 ? 'High' : accuracy < 75 ? 'Medium' : 'Low'
+
+      return {
+        subject,
+        accuracy,
+        priority,
+        action: subject.toLowerCase().includes('economy')
+          ? 'Revise GDP, inflation and fiscal indicators'
+          : subject.toLowerCase().includes('science')
+            ? 'Focus on environment, space and innovation updates'
+            : 'Prioritise current affairs and revision cycles',
+      }
+    })
+    .sort((a, b) => a.accuracy - b.accuracy)
+    .slice(0, 3)
+}
+
 export const revisionQueue = [
   'Fundamental Rights',
   'Land Reforms in AP',
@@ -325,9 +676,54 @@ export const studyPlan = [
   { day: 'Day 5', topic: 'Mock test + analysis', duration: '5 hrs' },
 ]
 
-export const practiceMetrics = [
-  { label: 'Attempted', value: 248 },
-  { label: 'Correct', value: 186 },
-  { label: 'Wrong', value: 62 },
-  { label: 'Skipped', value: 12 },
-]
+export type PracticeMetric = {
+  label: 'Attempted' | 'Correct' | 'Wrong' | 'Skipped'
+  value: number
+  detail: string
+  source: 'api' | 'local'
+  updatedAt: string
+}
+
+export const getPracticeMetrics = (userId: string): PracticeMetric[] => {
+  const attempts = getStoredUserMockAttempts(userId)
+
+  const totalAttempted = attempts.reduce((sum, attempt) => sum + (attempt.total || 0), 0)
+  const totalCorrect = attempts.reduce((sum, attempt) => sum + (attempt.correct ?? attempt.score ?? 0), 0)
+  const totalWrong = attempts.reduce((sum, attempt) => sum + (attempt.wrong ?? Math.max((attempt.total || 0) - (attempt.correct ?? attempt.score ?? 0) - (attempt.skipped ?? 0), 0)), 0)
+  const totalSkipped = attempts.reduce((sum, attempt) => sum + (attempt.skipped ?? 0), 0)
+
+  const updatedAt = attempts[0]?.submittedAt ?? new Date().toISOString()
+
+  return [
+    {
+      label: 'Attempted',
+      value: totalAttempted,
+      detail: `${attempts.length} test attempts recorded`,
+      source: attempts.length ? 'api' : 'local',
+      updatedAt,
+    },
+    {
+      label: 'Correct',
+      value: totalCorrect,
+      detail: `${totalAttempted ? Math.round((totalCorrect / totalAttempted) * 100) : 0}% accuracy`,
+      source: attempts.length ? 'api' : 'local',
+      updatedAt,
+    },
+    {
+      label: 'Wrong',
+      value: totalWrong,
+      detail: `${totalAttempted ? Math.round((totalWrong / totalAttempted) * 100) : 0}% error rate`,
+      source: attempts.length ? 'api' : 'local',
+      updatedAt,
+    },
+    {
+      label: 'Skipped',
+      value: totalSkipped,
+      detail: `${totalAttempted ? Math.round((totalSkipped / totalAttempted) * 100) : 0}% left blank`,
+      source: attempts.length ? 'api' : 'local',
+      updatedAt,
+    },
+  ]
+}
+
+export const practiceMetrics = getPracticeMetrics('demo-user')

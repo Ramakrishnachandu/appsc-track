@@ -31,7 +31,12 @@ type AppState = {
   updateDashboard: (next: DashboardState) => void
 }
 
-const toUser = (name: string, email: string, id: string): AppUser => ({ id, name, email })
+const toUser = (name: string, email: string, id: string, role: AppUser['role'] = 'user'): AppUser => ({ id, name, email, role })
+
+const resolveUserRole = (value?: string): AppUser['role'] => {
+  if (value === 'admin') return 'admin'
+  return 'user'
+}
 
 export const useAppStore = create<AppState>((set, get) => ({
   user: null,
@@ -50,8 +55,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       try {
-        const signedInUser = JSON.parse(stored) as AppUser
-        set({ user: signedInUser, dashboard: getUserDashboard(signedInUser) })
+        const signedInUser = JSON.parse(stored) as Partial<AppUser>
+        const normalisedUser: AppUser = {
+          id: signedInUser.id || 'demo-user',
+          name: signedInUser.name || 'Student',
+          email: signedInUser.email || 'student@appsc.com',
+          role: resolveUserRole(signedInUser.role),
+        }
+        set({ user: normalisedUser, dashboard: getUserDashboard(normalisedUser) })
       } catch {
         set({ user: null, dashboard: defaultDashboard })
       }
@@ -68,9 +79,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       data.session.user.user_metadata?.full_name || data.session.user.email?.split('@')[0] || 'Student',
       data.session.user.email || '',
       data.session.user.id,
+      resolveUserRole(data.session.user.user_metadata?.role || data.session.user.app_metadata?.role),
     )
 
-    set({ user: activeUser, dashboard: defaultDashboard })
+    localStorage.setItem('appsc_active_user', JSON.stringify(activeUser))
+    set({ user: activeUser, dashboard: getUserDashboard(activeUser) })
   },
 
   login: async ({ email, password }) => {
@@ -83,7 +96,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           throw new Error('Invalid email or password.')
         }
 
-        const user = toUser(existing.name, existing.email, existing.id)
+        const user = toUser(existing.name, existing.email, existing.id, existing.role)
         const dashboard = getUserDashboard(user)
         localStorage.setItem('appsc_active_user', JSON.stringify(user))
         set({ user, dashboard, loading: false, error: null })
@@ -97,10 +110,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'Student',
         data.user.email || '',
         data.user.id,
+        resolveUserRole(data.user.user_metadata?.role || data.user.app_metadata?.role),
       )
 
-      set({ user, loading: false, error: null, dashboard: defaultDashboard })
-      return
+      const dashboard = getUserDashboard(user)
+      localStorage.setItem('appsc_active_user', JSON.stringify(user))
+      set({ user, dashboard, loading: false, error: null })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Authentication failed.'
       set({ loading: false, error: message })
@@ -119,12 +134,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           throw new Error('User already exists. Please log in instead.')
         }
 
-        const newUser = { id: `demo-${Date.now()}`, name, email, password }
+        const newUser = { id: `demo-${Date.now()}`, name, email, password, role: 'user' as const }
         users.push(newUser)
         setDemoUsers(users)
-        const user = toUser(name, email, newUser.id)
-        localStorage.setItem('appsc_active_user', JSON.stringify(user))
+
+        const user = toUser(name, email, newUser.id, 'user')
         const dashboard = getUserDashboard(user)
+        localStorage.setItem('appsc_active_user', JSON.stringify(user))
         set({ user, dashboard, loading: false, error: null })
         return
       }
@@ -135,6 +151,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         options: {
           data: {
             full_name: name,
+            role: 'user',
           },
         },
       })
@@ -145,10 +162,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         name || data.user?.email?.split('@')[0] || 'Student',
         data.user?.email || email,
         data.user?.id || crypto.randomUUID(),
+        'user',
       )
 
+      localStorage.setItem('appsc_active_user', JSON.stringify(user))
       set({ user, loading: false, error: null, dashboard: defaultDashboard })
-      return
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Registration failed.'
       set({ loading: false, error: message })
