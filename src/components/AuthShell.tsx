@@ -94,19 +94,21 @@ export function AuthShell({
                 onChange={(event) => onPasswordChange(event.target.value)}
                 fullWidth
                 margin="normal"
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton
-                        aria-label="toggle password visibility"
-                        edge="end"
-                        onClick={() => setShowPassword((value) => !value)}
-                        onMouseDown={(event) => event.preventDefault()}
-                      >
-                        {showPassword ? <VisibilityOff /> : <Visibility />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
+                slotProps={{
+                  input: {
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          aria-label="toggle password visibility"
+                          edge="end"
+                          onClick={() => setShowPassword((value) => !value)}
+                          onMouseDown={(event) => event.preventDefault()}
+                        >
+                          {showPassword ? <VisibilityOff /> : <Visibility />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  },
                 }}
               />
 
