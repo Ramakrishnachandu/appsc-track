@@ -1,7 +1,10 @@
+export type UserRole = 'user' | 'admin'
+
 export type AppUser = {
   id: string
   name: string
   email: string
+  role: UserRole
 }
 
 export type DashboardState = {
