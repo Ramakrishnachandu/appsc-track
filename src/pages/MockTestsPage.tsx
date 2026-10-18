@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { Alert, Box, Button, Card, CardContent, LinearProgress } from '@mui/material'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Alert, Box, Button, Card, CardContent, CircularProgress, LinearProgress } from '@mui/material'
 import {
   getMockTestsFromApi,
+  getUserMockAttemptsFromApi,
   submitMockTestToApi,
 } from '../lib/mockTestApi'
 import {
@@ -19,103 +20,168 @@ export function MockTestsPage() {
   const [selectedTestId, setSelectedTestId] = useState<string | null>(null)
   const [selectedPaperType, setSelectedPaperType] = useState<'All' | MockPaperType>('All')
   const [answers, setAnswers] = useState<Record<string, number>>({})
+  const [userAttempts, setUserAttempts] = useState<MockAttempt[]>([])
   const [latestAttempt, setLatestAttempt] = useState<MockAttempt | null>(null)
   const [isStarted, setIsStarted] = useState(false)
+  const [isLoadingTests, setIsLoadingTests] = useState(true)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [attemptsError, setAttemptsError] = useState<string | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [questionIndex, setQuestionIndex] = useState(0)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
+  const submitLock = useRef(false)
+  const submitHandler = useRef<(autoSubmitted?: boolean) => Promise<void>>(async () => {})
 
   useEffect(() => {
     let isMounted = true
 
-    void (async () => {
-      const storedTests = await getMockTestsFromApi()
-      if (!isMounted) return
-
-      setTests(storedTests)
-      if (storedTests[0]) {
-        setSelectedTestId((current) => current || storedTests[0].id)
-      }
-    })()
+    void getMockTestsFromApi()
+      .then((storedTests) => {
+        if (!isMounted) return
+        setTests(storedTests)
+        if (storedTests[0]) setSelectedTestId(storedTests[0].id)
+      })
+      .catch((error: unknown) => {
+        if (isMounted) setLoadError(error instanceof Error ? error.message : 'Unable to load mock tests.')
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingTests(false)
+      })
 
     return () => {
       isMounted = false
     }
   }, [])
 
-  const visibleTests = selectedPaperType === 'All' ? tests : tests.filter((test) => test.paperType === selectedPaperType)
-  const currentTest = visibleTests.find((test) => test.id === selectedTestId) ?? visibleTests[0] ?? tests[0] ?? null
-  const userAttempts = user ? getStoredUserMockAttempts(user.id) : []
-  const computedResult = latestAttempt ?? (currentTest ? userAttempts.find((attempt) => attempt.testId === currentTest.id) ?? null : null)
+  useEffect(() => {
+    if (!user?.id) return
+    let isCurrentUser = true
 
+    void getUserMockAttemptsFromApi(user.id)
+      .then((attempts) => {
+        if (!isCurrentUser) return
+        setUserAttempts(attempts)
+        setAttemptsError(null)
+      })
+      .catch((error: unknown) => {
+        if (!isCurrentUser) return
+        setUserAttempts(getStoredUserMockAttempts(user.id))
+        setAttemptsError(error instanceof Error ? error.message : 'Unable to refresh saved results.')
+      })
+
+    return () => {
+      isCurrentUser = false
+    }
+  }, [user?.id])
+
+  const visibleTests = selectedPaperType === 'All' ? tests : tests.filter((test) => test.paperType === selectedPaperType)
+  const currentTest = visibleTests.find((test) => test.id === selectedTestId) ?? visibleTests[0] ?? null
+  const savedAttempt = currentTest ? userAttempts.find((attempt) => attempt.testId === currentTest.id) ?? null : null
   const currentQuestion = currentTest?.questions[questionIndex] ?? null
   const attemptedCount = currentTest ? currentTest.questions.filter((question) => typeof answers[question.id] === 'number').length : 0
   const unansweredCount = currentTest ? currentTest.questions.length - attemptedCount : 0
-  const resultAccuracy = computedResult
-    ? computedResult.accuracy ?? (computedResult.total ? Math.round((computedResult.score / computedResult.total) * 100) : 0)
-    : 0
+  const displayedAttempt = isStarted ? null : latestAttempt ?? savedAttempt
+  const resultAccuracy = displayedAttempt
+    ? displayedAttempt.accuracy ?? (displayedAttempt.total ? Math.round((displayedAttempt.score / displayedAttempt.total) * 100) : 0)
+    : null
+  const isReviewing = Boolean(latestAttempt && !isStarted)
+
+  const handleSubmit = useCallback(async (autoSubmitted = false) => {
+    if (!currentTest || !user || submitLock.current) return
+    if (!autoSubmitted && unansweredCount > 0 && !window.confirm(`You have ${unansweredCount} unanswered question${unansweredCount === 1 ? '' : 's'}. Submit anyway?`)) return
+
+    submitLock.current = true
+    setIsSubmitting(true)
+    setSubmitError(null)
+
+    try {
+      const result = await submitMockTestToApi({ testId: currentTest.id, answers, userId: user.id })
+      const attempt: MockAttempt = {
+        id: `${currentTest.id}-${Date.now()}`,
+        testId: result.testId,
+        testTitle: result.testTitle,
+        score: result.score,
+        total: result.total,
+        correct: result.correct,
+        wrong: result.wrong,
+        skipped: result.skipped,
+        accuracy: result.accuracy,
+        paperType: result.paperType,
+        subjectName: currentTest.subjectName,
+        submittedAt: result.submittedAt,
+      }
+
+      const existingAttempts = getStoredUserMockAttempts(user.id)
+      const nextAttempts = [attempt, ...existingAttempts.filter((item) => item.testId !== currentTest.id)].slice(0, 12)
+      saveStoredUserMockAttempts(user.id, nextAttempts)
+      setUserAttempts(nextAttempts)
+      setAttemptsError(null)
+      setLatestAttempt(attempt)
+      setIsStarted(false)
+      setRemainingSeconds(0)
+      setQuestionIndex(0)
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to submit this assessment. Please try again.')
+    } finally {
+      submitLock.current = false
+      setIsSubmitting(false)
+    }
+  }, [answers, currentTest, unansweredCount, user])
 
   useEffect(() => {
-    if (!currentTest || !isStarted) return
+    submitHandler.current = handleSubmit
+  }, [handleSubmit])
 
-    if (remainingSeconds <= 0) {
-      void handleSubmit(true)
-      return
-    }
+  useEffect(() => {
+    if (!isStarted) return
 
-    const timer = window.setTimeout(() => {
-      setRemainingSeconds((value) => value - 1)
+    const timer = window.setInterval(() => {
+      setRemainingSeconds((seconds) => Math.max(0, seconds - 1))
     }, 1000)
 
-    return () => window.clearTimeout(timer)
-  }, [currentTest, isStarted, remainingSeconds])
+    return () => window.clearInterval(timer)
+  }, [isStarted])
+
+  useEffect(() => {
+    if (isStarted && remainingSeconds === 0) {
+      void submitHandler.current(true)
+    }
+  }, [isStarted, remainingSeconds])
 
   const startTest = () => {
-    if (!currentTest) return
+    if (!currentTest || currentTest.questions.length === 0) return
 
+    submitLock.current = false
     setAnswers({})
     setQuestionIndex(0)
     setLatestAttempt(null)
+    setSubmitError(null)
+    setRemainingSeconds(Math.max(1, currentTest.durationMinutes) * 60)
     setIsStarted(true)
-    setRemainingSeconds(currentTest.durationMinutes * 60)
   }
 
-  const handleAnswerSelect = (questionId: string, value: number) => {
-    setAnswers((current) => ({ ...current, [questionId]: value }))
+  const selectTest = (testId: string) => {
+    setSelectedTestId(testId)
+    setAnswers({})
+    setQuestionIndex(0)
+    setLatestAttempt(null)
+    setSubmitError(null)
+  }
+
+  const selectPaperType = (paperType: 'All' | MockPaperType) => {
+    const nextTests = paperType === 'All' ? tests : tests.filter((test) => test.paperType === paperType)
+    setSelectedPaperType(paperType)
+    setSelectedTestId(nextTests[0]?.id ?? null)
+    setAnswers({})
+    setQuestionIndex(0)
+    setLatestAttempt(null)
+    setSubmitError(null)
   }
 
   const handleQuestionJump = (index: number) => {
     if (!currentTest) return
     setQuestionIndex(Math.min(Math.max(index, 0), currentTest.questions.length - 1))
-  }
-
-  const handleSubmit = async (autoSubmitted = false) => {
-    if (!currentTest || !user) return
-
-    const result = await submitMockTestToApi({ testId: currentTest.id, answers, userId: user.id })
-    const attempt: MockAttempt = {
-      id: `${currentTest.id}-${Date.now()}`,
-      testId: result.testId,
-      testTitle: result.testTitle,
-      score: result.score,
-      total: result.total,
-      correct: result.correct,
-      wrong: result.wrong,
-      skipped: result.skipped,
-      accuracy: result.accuracy,
-      paperType: result.paperType,
-      subjectName: currentTest.subjectName,
-      submittedAt: result.submittedAt,
-    }
-
-    const nextAttempts = [attempt, ...userAttempts.filter((item) => item.testId !== currentTest.id)].slice(0, 12)
-    saveStoredUserMockAttempts(user.id, nextAttempts)
-    setLatestAttempt(attempt)
-    setIsStarted(false)
-    setRemainingSeconds(0)
-
-    if (autoSubmitted) {
-      setQuestionIndex(0)
-    }
   }
 
   const formatTime = (totalSeconds: number) => {
@@ -129,6 +195,10 @@ export function MockTestsPage() {
       <Alert severity="info">
         Notification 37/2026 specifies 150 questions in 150 minutes for Screening and for each Mains paper, with a one-third penalty per wrong answer. These shorter in-app practice sets score correct answers only and do not apply negative marking; they are not previous-year questions.
       </Alert>
+
+      {loadError && <Alert severity="error">{loadError}</Alert>}
+      {attemptsError && <Alert severity="warning">Saved results could not be refreshed: {attemptsError}</Alert>}
+
       {!isStarted && (
         <Card className="panel-card mock-test-list-card">
           <CardContent>
@@ -154,115 +224,172 @@ export function MockTestsPage() {
               </div>
             </div>
 
-            <div className="filter-row">
+            <div className="filter-row" aria-label="Filter tests by paper">
               {(['All', 'Prelims', 'Mains'] as const).map((filter) => (
                 <button
                   key={filter}
                   type="button"
                   className={selectedPaperType === filter ? 'subject-filter active' : 'subject-filter'}
-                  onClick={() => setSelectedPaperType(filter)}
+                  aria-pressed={selectedPaperType === filter}
+                  onClick={() => selectPaperType(filter)}
                 >
                   {filter}
                 </button>
               ))}
             </div>
 
-            <div className="mock-test-grid">
-              {visibleTests.map((test) => (
-                <button
-                  key={test.id}
-                  type="button"
-                  className={selectedTestId === test.id ? 'mock-test-card active' : 'mock-test-card'}
-                  onClick={() => setSelectedTestId(test.id)}
-                >
-                  <div className="mock-test-card-top">
-                    <span className="subject-tag">{test.paperType}</span>
-                    <strong>{test.durationMinutes} min</strong>
-                  </div>
-                  <h3>{test.title}</h3>
-                  <p>{test.subjectName}</p>
-                  <div className="subject-progress-wrap">
-                    <LinearProgress variant="determinate" value={Math.min(100, (test.questions.length / 10) * 100)} />
-                  </div>
-                  <div className="subject-progress-row">
-                    <span>Questions</span>
-                    <strong>{test.questions.length}</strong>
-                  </div>
-                </button>
-              ))}
-            </div>
+            {isLoadingTests ? (
+              <div className="mock-test-loading"><CircularProgress aria-label="Loading mock tests" /></div>
+            ) : visibleTests.length ? (
+              <div className="mock-test-grid">
+                {visibleTests.map((test) => {
+                  const attempt = userAttempts.find((item) => item.testId === test.id)
+                  return (
+                    <button
+                      key={test.id}
+                      type="button"
+                      className={currentTest?.id === test.id ? 'mock-test-card active' : 'mock-test-card'}
+                      aria-pressed={currentTest?.id === test.id}
+                      onClick={() => selectTest(test.id)}
+                    >
+                      <div className="mock-test-card-top">
+                        <span className="subject-tag">{test.paperType}</span>
+                        <strong>{test.durationMinutes} min</strong>
+                      </div>
+                      <h3>{test.title}</h3>
+                      <p>{test.subjectName}</p>
+                      <div className="subject-progress-wrap">
+                        <LinearProgress variant="determinate" value={Math.min(100, (test.questions.length / 10) * 100)} />
+                      </div>
+                      <div className="subject-progress-row">
+                        <span>{test.questions.length} questions</span>
+                        {attempt && <strong>Last score: {attempt.score}/{attempt.total}</strong>}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="mock-test-empty-state">
+                <h3>{tests.length ? 'No tests for this paper yet' : 'No mock tests available'}</h3>
+                <p>{tests.length ? 'Choose another paper type to see available assessments.' : 'Published mock tests will appear here when they are available.'}</p>
+              </div>
+            )}
 
             {currentTest && (
               <div className="mock-test-start-panel">
                 <div>
                   <span className="subject-detail-badge">Selected test</span>
                   <h3>{currentTest.title}</h3>
+                  <p>{currentTest.questions.length} questions · {currentTest.durationMinutes} minutes</p>
                 </div>
-                <Button variant="contained" onClick={startTest}>Start test</Button>
+                <Button variant="contained" onClick={startTest} disabled={isLoadingTests || currentTest.questions.length === 0}>
+                  Start assessment
+                </Button>
               </div>
             )}
           </CardContent>
         </Card>
       )}
 
-      {currentTest && (
+      {currentTest && (isStarted || latestAttempt) && (
         <Card className="panel-card assessment-panel-card">
           <CardContent>
             <div className="assessment-header-row">
               <div>
-                <span className="subject-detail-badge">Assessment</span>
+                <span className="subject-detail-badge">{isReviewing ? 'Assessment review' : 'Assessment in progress'}</span>
                 <h2>{currentTest.title}</h2>
               </div>
-              <div className="assessment-timer">{formatTime(remainingSeconds)}</div>
+              <div className={remainingSeconds <= 60 && isStarted ? 'assessment-timer urgent' : 'assessment-timer'} aria-live="polite">
+                {isStarted ? formatTime(remainingSeconds) : 'Submitted'}
+                {isStarted && <span>Time remaining</span>}
+              </div>
             </div>
+
+            {latestAttempt && !isStarted && (
+              <Alert severity="success" className="assessment-result-banner">
+                Assessment submitted. You scored <strong>{latestAttempt.score} of {latestAttempt.total}</strong> ({resultAccuracy}% accuracy).
+              </Alert>
+            )}
+            {submitError && <Alert severity="error" className="assessment-result-banner">{submitError}</Alert>}
 
             <div className="assessment-layout">
               <div className="assessment-main-panel">
                 {currentQuestion && (
                   <>
                     <div className="assessment-question-meta">
-                      <span>Question {questionIndex + 1}</span>
-                      <span>{currentTest.questions.length} total</span>
+                      <span>Question {questionIndex + 1} of {currentTest.questions.length}</span>
+                      <span>{typeof answers[currentQuestion.id] === 'number' ? 'Answered' : 'Not answered'}</span>
                     </div>
 
                     <h3>{currentQuestion.prompt}</h3>
 
-                    <div className="answer-options-grid">
-                      {currentQuestion.options.map((option, index) => (
-                        <button
-                          key={`${currentQuestion.id}-${index}`}
-                          type="button"
-                          className={answers[currentQuestion.id] === index ? 'answer-option selected' : 'answer-option'}
-                          onClick={() => handleAnswerSelect(currentQuestion.id, index)}
-                        >
-                          <span>{String.fromCharCode(65 + index)}</span>
-                          {option}
-                        </button>
-                      ))}
+                    <div className="answer-options-grid" role="group" aria-label={`Answer options for question ${questionIndex + 1}`}>
+                      {currentQuestion.options.map((option, index) => {
+                        const isSelected = answers[currentQuestion.id] === index
+                        const isCorrect = isReviewing && currentQuestion.correctIndex === index
+                        const isIncorrectSelection = isReviewing && isSelected && !isCorrect
+                        const optionClass = [
+                          'answer-option',
+                          isSelected ? 'selected' : '',
+                          isCorrect ? 'correct' : '',
+                          isIncorrectSelection ? 'incorrect' : '',
+                        ].filter(Boolean).join(' ')
+                        return (
+                          <button
+                            key={`${currentQuestion.id}-${index}`}
+                            type="button"
+                            className={optionClass}
+                            aria-pressed={isSelected}
+                            disabled={!isStarted || isSubmitting}
+                            onClick={() => setAnswers((current) => ({ ...current, [currentQuestion.id]: index }))}
+                          >
+                            <span>{String.fromCharCode(65 + index)}</span>
+                            {option}
+                          </button>
+                        )
+                      })}
                     </div>
+                    {isReviewing && <p className="assessment-explanation"><strong>Explanation:</strong> {currentQuestion.explanation}</p>}
                   </>
                 )}
 
                 <div className="assessment-footer">
                   <Button variant="outlined" onClick={() => handleQuestionJump(questionIndex - 1)} disabled={questionIndex === 0}>Previous</Button>
                   <Button variant="outlined" onClick={() => handleQuestionJump(questionIndex + 1)} disabled={questionIndex >= currentTest.questions.length - 1}>Next</Button>
-                  <Button variant="contained" color="success" onClick={() => void handleSubmit()}>Submit now</Button>
+                  {isStarted ? (
+                    <Button variant="contained" color="success" onClick={() => void handleSubmit()} disabled={isSubmitting}>
+                      {isSubmitting ? 'Submitting…' : 'Submit assessment'}
+                    </Button>
+                  ) : (
+                    <Button variant="contained" onClick={startTest}>Retake assessment</Button>
+                  )}
                 </div>
               </div>
 
-              <aside className="assessment-side-panel">
+              <aside className="assessment-side-panel" aria-label="Assessment question navigator">
                 <div className="assessment-side-header">Question navigator</div>
                 <div className="assessment-question-grid">
-                  {currentTest.questions.map((question, index) => (
-                    <button
-                      key={question.id}
-                      type="button"
-                      className={questionIndex === index ? 'assessment-question-dot active' : 'assessment-question-dot'}
-                      onClick={() => handleQuestionJump(index)}
-                    >
-                      {index + 1}
-                    </button>
-                  ))}
+                  {currentTest.questions.map((question, index) => {
+                    const questionAnswered = typeof answers[question.id] === 'number'
+                    const questionClass = [
+                      'assessment-question-dot',
+                      questionIndex === index ? 'active' : '',
+                      questionAnswered ? 'answered' : '',
+                    ].filter(Boolean).join(' ')
+                    return (
+                      <button
+                        key={question.id}
+                        type="button"
+                        className={questionClass}
+                        aria-label={`Go to question ${index + 1}${questionAnswered ? ', answered' : ', unanswered'}`}
+                        aria-current={questionIndex === index ? 'step' : undefined}
+                        onClick={() => handleQuestionJump(index)}
+                      >
+                        {index + 1}
+                      </button>
+                    )
+                  })}
                 </div>
                 <div className="assessment-side-summary">
                   <div>
@@ -274,8 +401,8 @@ export function MockTestsPage() {
                     <strong>{unansweredCount}</strong>
                   </div>
                   <div>
-                    <span>Accuracy</span>
-                    <strong>{resultAccuracy}%</strong>
+                    <span>{displayedAttempt ? 'Accuracy' : 'Status'}</span>
+                    <strong>{resultAccuracy === null ? 'In progress' : `${resultAccuracy}%`}</strong>
                   </div>
                 </div>
               </aside>
