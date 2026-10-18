@@ -51,7 +51,7 @@ This application helps APPSC aspirants:
    - VITE_SUPABASE_ANON_KEY
 3. Apply the database SQL in the Supabase SQL editor:
    - New Supabase project: run `supabase/schema.sql` once.
-   - Existing project: run `supabase/migrations/20261018_study_plans.sql`.
+   - Existing project: run `supabase/migrations/20261018_study_plans.sql`, then `supabase/migrations/20261019_preparation_workflow.sql`.
 4. Start the app:
    npm run dev
 5. Production build:
@@ -78,15 +78,17 @@ Without Supabase configuration, the app uses per-demo-user localStorage for deve
 
 The APPSC portal links the Group-II syllabus published on 27 April 2023 and Notification No. 37/2026, dated 13 October 2026. The 37/2026 notification's scheme specifies a 150-question, 150-minute, 150-mark Screening Test and two Mains papers, each 150 questions, 150 minutes, and 150 marks. It prescribes a one-third mark penalty for each wrong answer. The syllabus map source-labels the official paper, subject, and screening-section headings; topic-level organization and subtopics are suggested study detail. Recheck APPSC's portal for later corrigenda or notifications.
 
-The topic quick-check bank contains original planner practice questions only. It is not a previous-year question bank and does not label generated questions as official APPSC questions. Existing in-app mock tests are short practice sets that score correct answers only; they are not full-pattern exam simulations and do not apply official negative marking. Topics without a curated quick check still support study sessions, notes, status, confidence, and revisions.
+The topic quick-check bank contains original planner practice questions only. It is not a previous-year question bank and does not label generated questions as official APPSC questions. Short mock tests are practice-only and do not apply negative marking. Admins can import manually verified questions as JSON; an assessment is eligible for the official-pattern label and one-third penalty scoring only when it contains exactly 150 questions, lasts 150 minutes, and every question has a publication date, source title, and HTTPS URL on `psc.ap.gov.in`. The app does not generate or independently verify imported content. Topics without a curated quick check still support study sessions, notes, status, confidence, and revisions.
+
+Current-affairs notes are candidate-maintained records. Each entry stores its source title, URL, and publication date; the app does not generate, verify, or automatically refresh news.
 
 ## Study workflow
 
-- The planner distributes syllabus topics across the available daily study hours and retains old sessions when preferences change.
-- Overdue sessions are redistributed into available daily capacity; their original scheduled records remain visible in the long-term view.
+- The planner distributes syllabus topics across the selected available weekdays and each day's capacity; changing preferences preserves completed history and explicitly reschedules remaining topic sessions.
+- Missed sessions remain visible until the candidate chooses a suggested reschedule date or skips the session; opening the plan does not silently rewrite overdue work.
 - Finishing a topic schedules revisions at 1, 3, 7, 14, and 30 days. Repeated wrong answers or low confidence shorten later intervals; strong recent recall can extend them.
 - A running timer checkpoints every 10 seconds. After an interruption, time after the last checkpoint is excluded; actual study time is added to totals only when the user finishes the session.
-- Applying the migration is required for Supabase-backed plans. Demo-mode plans do not require a database.
+- Both existing-project migrations are required for Supabase-backed preparation features. Demo-mode plans and notes do not require a database.
 
 ## SEO and discoverability
 

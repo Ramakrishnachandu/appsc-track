@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import { hydrateSyllabusConfigFromSupabase } from '../data/dashboardData'
 import { setAdminSyllabusConfig } from '../data/group2Syllabus'
 import { loadUserStudyPlan, saveUserStudyPlan } from '../lib/studyPlanApi'
-import { rebalanceOverdueSessions } from '../lib/studyPlanner'
 import type { StudyPlanData } from '../types/studyPlanner'
 
 type StudyPlanState = {
@@ -37,11 +36,7 @@ export const useStudyPlanStore = create<StudyPlanState>((set, get) => ({
       const loaded = await loadUserStudyPlan(userId)
       if (get().userId !== userId) return
 
-      const balanced = rebalanceOverdueSessions(loaded)
-      set({ plan: balanced, loading: false })
-      if (balanced !== loaded) {
-        await saveUserStudyPlan(userId, balanced)
-      }
+      set({ plan: loaded, loading: false })
     } catch (error) {
       if (get().userId === userId) {
         set({

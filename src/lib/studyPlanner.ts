@@ -13,6 +13,8 @@ import type {
 
 export const REVISION_INTERVALS_DAYS = [1, 3, 7, 14, 30] as const
 export const DEFAULT_DAILY_HOURS = 4
+export const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
+export const DEFAULT_DAY_AVAILABILITY = [0, DEFAULT_DAILY_HOURS, DEFAULT_DAILY_HOURS, DEFAULT_DAILY_HOURS, DEFAULT_DAILY_HOURS, DEFAULT_DAILY_HOURS, DEFAULT_DAILY_HOURS]
 
 export const getLocalDateKey = (date = new Date()) => {
   const year = date.getFullYear()
@@ -56,9 +58,26 @@ export const createDefaultStudyPlanSettings = (date = new Date()): StudyPlanSett
   level: 'beginner',
   medium: 'bilingual',
   dailyHours: DEFAULT_DAILY_HOURS,
+  dayAvailability: [...DEFAULT_DAY_AVAILABILITY],
   startDate: getLocalDateKey(date),
   targetDate: null,
 })
+
+const normalizeDayAvailability = (availability: unknown, dailyHours: number): number[] => {
+  if (!Array.isArray(availability) || availability.length !== 7) {
+    return DEFAULT_DAY_AVAILABILITY.map((hours) => hours ? Math.min(16, dailyHours) : 0)
+  }
+  const normalized = availability.map((hours) => Number.isFinite(Number(hours)) ? Math.min(16, Math.max(0, Number(hours))) : 0)
+  return normalized.some((hours) => hours > 0)
+    ? normalized
+    : DEFAULT_DAY_AVAILABILITY.map((hours) => hours ? Math.min(16, dailyHours) : 0)
+}
+
+export const getDailyCapacityMinutes = (settings: StudyPlanSettings, date: string) => {
+  const parsedDate = new Date(`${date}T12:00:00`)
+  const hours = settings.dayAvailability?.[parsedDate.getDay()] ?? settings.dailyHours
+  return Math.round(Math.min(16, Math.max(0, hours)) * 60)
+}
 
 export const createTopicProgress = (topic: SyllabusTopic): TopicProgress => ({
   topicId: topic.id,
@@ -86,7 +105,6 @@ const createSessionsForTopics = (
   settings: StudyPlanSettings,
   firstDate: string,
 ): PlanSession[] => {
-  const capacity = Math.max(30, Math.round(settings.dailyHours * 60))
   const durationFactor = getLevelDurationFactor(settings.level)
   const dailyLoad = new Map<string, number>()
   const sessions: PlanSession[] = []
@@ -96,6 +114,11 @@ const createSessionsForTopics = (
     let remainingMinutes = Math.max(15, Math.round(topic.estimatedMinutes * durationFactor))
 
     while (remainingMinutes > 0) {
+      const capacity = getDailyCapacityMinutes(settings, currentDate)
+      if (capacity === 0) {
+        currentDate = addDaysToDateKey(currentDate, 1)
+        continue
+      }
       const usedToday = dailyLoad.get(currentDate) ?? 0
       if (usedToday >= capacity) {
         currentDate = addDaysToDateKey(currentDate, 1)
@@ -139,6 +162,7 @@ export const createInitialStudyPlan = (
 export const normalizeStudyPlan = (value: Partial<StudyPlanData> | null | undefined): StudyPlanData => {
   const defaults = createInitialStudyPlan()
   const settings = { ...defaults.settings, ...(value?.settings ?? {}) }
+  settings.dayAvailability = normalizeDayAvailability(value?.settings?.dayAvailability, settings.dailyHours)
   const topics = getAllSyllabusTopics()
   const savedProgress = new Map((value?.topicProgress ?? []).map((entry) => [entry.topicId, entry]))
   const currentTopicIds = new Set(topics.map((topic) => topic.id))
@@ -199,54 +223,30 @@ export const createPlanWithSettings = (
   }
 }
 
-export const rebalanceOverdueSessions = (data: StudyPlanData, today = getLocalDateKey()): StudyPlanData => {
-  const overdue = data.sessions.filter((session) => session.status === 'planned' && session.date < today)
-  if (!overdue.length) return data
+export const getSuggestedRescheduleDate = (data: StudyPlanData, sessionId: string, fromDate = getLocalDateKey()): string | null => {
+  const session = data.sessions.find((item) => item.id === sessionId && item.status === 'planned')
+  if (!session) return null
 
-  const futureLoad = new Map<string, number>()
-  data.sessions
-    .filter((session) => session.status === 'planned' && session.date >= today)
-    .forEach((session) => futureLoad.set(session.date, (futureLoad.get(session.date) ?? 0) + session.plannedMinutes))
-
-  const capacity = Math.max(30, Math.round(data.settings.dailyHours * 60))
-  const replacements = overdue.flatMap((session) => {
-    let date = today
-    let remainingMinutes = session.plannedMinutes
-    const replacementsForSession: PlanSession[] = []
-
-    while (remainingMinutes > 0) {
-      const plannedMinutes = Math.min(remainingMinutes, capacity)
-      while ((futureLoad.get(date) ?? 0) + plannedMinutes > capacity) {
-        date = addDaysToDateKey(date, 1)
-      }
-      futureLoad.set(date, (futureLoad.get(date) ?? 0) + plannedMinutes)
-      replacementsForSession.push({
-        ...session,
-        id: createId('rescheduled'),
-        date,
-        plannedMinutes,
-        status: 'planned',
-        createdAt: new Date().toISOString(),
-        rescheduledFrom: session.date,
-        completedAt: undefined,
-      })
-      remainingMinutes -= plannedMinutes
-      if (remainingMinutes > 0) date = addDaysToDateKey(date, 1)
-    }
-
-    return replacementsForSession
-  })
-
-  const overdueIds = new Set(overdue.map((session) => session.id))
-  return {
-    ...data,
-    sessions: [
-      ...data.sessions.map((session) => overdueIds.has(session.id) ? { ...session, status: 'rescheduled' as const } : session),
-      ...replacements,
-    ],
-    updatedAt: new Date().toISOString(),
+  for (let dayOffset = 0; dayOffset < 366; dayOffset += 1) {
+    const candidateDate = addDaysToDateKey(fromDate, dayOffset)
+    const capacity = getDailyCapacityMinutes(data.settings, candidateDate)
+    if (capacity === 0 || session.plannedMinutes > capacity) continue
+    const scheduledMinutes = data.sessions
+      .filter((item) => item.date === candidateDate && item.id !== sessionId && item.status === 'planned')
+      .reduce((sum, item) => sum + item.plannedMinutes, 0)
+    if (scheduledMinutes + session.plannedMinutes <= capacity) return candidateDate
   }
+
+  return null
 }
+
+export const skipPlanSession = (data: StudyPlanData, sessionId: string): StudyPlanData => ({
+  ...data,
+  sessions: data.sessions.map((session) => session.id === sessionId && session.status === 'planned'
+    ? { ...session, status: 'skipped' as const }
+    : session),
+  updatedAt: new Date().toISOString(),
+})
 
 export const getTopicProgress = (data: StudyPlanData, topicId: string) =>
   data.topicProgress.find((progress) => progress.topicId === topicId)
@@ -406,7 +406,13 @@ export const recordTopicQuizAnswer = (data: StudyPlanData, attempt: StudyPlanDat
 export const reschedulePlanSession = (data: StudyPlanData, sessionId: string, date: string): StudyPlanData => {
   const target = data.sessions.find((session) => session.id === sessionId)
   const parsedDate = new Date(`${date}T12:00:00`)
-  if (!target || target.status !== 'planned' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsedDate.getTime()) || getLocalDateKey(parsedDate) !== date) return data
+  if (!target || target.status !== 'planned' || date < getLocalDateKey()
+    || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsedDate.getTime()) || getLocalDateKey(parsedDate) !== date) return data
+  const capacity = getDailyCapacityMinutes(data.settings, date)
+  const existingMinutes = data.sessions
+    .filter((session) => session.date === date && session.id !== sessionId && session.status === 'planned')
+    .reduce((sum, session) => sum + session.plannedMinutes, 0)
+  if (capacity === 0 || existingMinutes + target.plannedMinutes > capacity) return data
 
   return {
     ...data,

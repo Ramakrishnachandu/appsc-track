@@ -32,6 +32,45 @@ export type MockApiResult = {
   submittedAt: string
   paperType: MockPaperType
   message: string
+  assessmentMode: 'practice' | 'official-pattern'
+  marksPerQuestion: number
+  negativeMarksPerWrong: number
+}
+
+export const getMockTestValidationError = (test: MockTest): string | null => {
+  if (!test.title.trim()) return 'Enter a title for this assessment.'
+  if (!Number.isInteger(test.durationMinutes) || test.durationMinutes < 1) return 'Assessment duration must be a positive whole number.'
+  if (test.questions.length === 0) return 'Add at least one complete question before publishing.'
+
+  for (const [index, question] of test.questions.entries()) {
+    if (!question.prompt.trim() || question.options.length !== 4 || question.options.some((option) => !option.trim())) {
+      return `Question ${index + 1} needs a prompt and four non-empty options.`
+    }
+    if (!Number.isInteger(question.correctIndex) || question.correctIndex < 0 || question.correctIndex > 3) {
+      return `Select a valid answer for question ${index + 1}.`
+    }
+  }
+
+  if (test.assessmentMode !== 'official-pattern') return null
+  if (test.questions.length !== 150 || test.durationMinutes !== 150) {
+    return 'Exam-pattern assessments require exactly 150 questions and 150 minutes.'
+  }
+
+  const hasOfficialSourceForEveryQuestion = test.questions.every((question) => {
+    if (!question.sourceTitle?.trim() || !question.sourcePublishedAt || !question.sourceUrl) return false
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(question.sourcePublishedAt)) return false
+    const publicationDate = new Date(`${question.sourcePublishedAt}T00:00:00.000Z`)
+    if (Number.isNaN(publicationDate.getTime()) || publicationDate.toISOString().slice(0, 10) !== question.sourcePublishedAt) return false
+    try {
+      const source = new URL(question.sourceUrl)
+      return source.protocol === 'https:' && source.hostname === 'psc.ap.gov.in' && !source.username && !source.password
+    } catch {
+      return false
+    }
+  })
+  return hasOfficialSourceForEveryQuestion
+    ? null
+    : 'Every exam-pattern question needs a source title, publication date, and HTTPS URL on psc.ap.gov.in.'
 }
 
 const prelimsTemplates: Omit<MockQuestion, 'id' | 'subjectId' | 'subjectName' | 'paperType'>[] = [
@@ -125,52 +164,63 @@ export const buildMockQuestionSet = ({
   }))
 }
 
-const mapDbTest = (row: Record<string, any>): MockTest | null => {
+const mapDbTest = (row: Record<string, unknown>): MockTest | null => {
   if (!row) return null
 
-  const questions = Array.isArray(row.questions) ? row.questions.map((question: any, index: number) => ({
-    id: String(question.id ?? `${row.id}-q-${index + 1}`),
-    subjectId: question.subjectId ?? row.subject_id ?? row.id,
-    subjectName: question.subjectName ?? row.subject_name ?? 'General subject',
-    paperType: question.paperType ?? row.paper_type ?? 'Prelims',
-    prompt: String(question.prompt ?? 'Sample question'),
-    options: Array.isArray(question.options) && question.options.length ? question.options.map(String) : ['Option A', 'Option B', 'Option C', 'Option D'],
-    correctIndex: Number(question.correctIndex ?? 0),
-    explanation: String(question.explanation ?? 'Answer explanation'),
-  })) : []
+  const questions = Array.isArray(row.questions) ? row.questions.map((item, index) => {
+    const question = item && typeof item === 'object' && !Array.isArray(item)
+      ? item as Record<string, unknown>
+      : {}
+    return {
+      id: String(question.id ?? `${String(row.id ?? 'mock')}-q-${index + 1}`),
+      subjectId: String(question.subjectId ?? row.subject_id ?? row.id ?? ''),
+      subjectName: String(question.subjectName ?? row.subject_name ?? 'General subject'),
+      paperType: question.paperType === 'Mains' || row.paper_type === 'Mains' ? 'Mains' as const : 'Prelims' as const,
+      prompt: String(question.prompt ?? 'Sample question'),
+      options: Array.isArray(question.options) && question.options.length ? question.options.map(String) : ['Option A', 'Option B', 'Option C', 'Option D'],
+      correctIndex: Number(question.correctIndex ?? 0),
+      explanation: String(question.explanation ?? 'Answer explanation'),
+      sourceTitle: question.sourceTitle == null ? undefined : String(question.sourceTitle),
+      sourceUrl: question.sourceUrl == null ? undefined : String(question.sourceUrl),
+      sourcePublishedAt: question.sourcePublishedAt == null ? undefined : String(question.sourcePublishedAt),
+    }
+  }) : []
 
-  return {
+  const mappedTest: MockTest = {
     id: String(row.id ?? `mock-${Date.now()}`),
     title: String(row.title ?? 'Mock test'),
     schedule: row.schedule === 'Weekly' ? 'Weekly' : 'Daily',
     durationMinutes: Number(row.duration_minutes ?? row.durationMinutes ?? 30),
     createdAt: String(row.created_at ?? new Date().toISOString()),
     paperType: row.paper_type === 'Mains' ? 'Mains' : 'Prelims',
-    subjectId: row.subject_id ?? row.subjectId ?? undefined,
-    subjectName: row.subject_name ?? row.subjectName ?? 'General assessment',
+    subjectId: row.subject_id == null && row.subjectId == null ? undefined : String(row.subject_id ?? row.subjectId),
+    subjectName: String(row.subject_name ?? row.subjectName ?? 'General assessment'),
     source: 'api',
+    assessmentMode: row.assessment_mode === 'official-pattern' || row.assessmentMode === 'official-pattern'
+      ? 'official-pattern'
+      : 'practice',
     questions,
   }
+  const validationError = mappedTest.assessmentMode === 'official-pattern'
+    ? getMockTestValidationError(mappedTest)
+    : null
+  if (validationError) {
+    throw new Error(`Saved exam-pattern assessment "${mappedTest.title}" is invalid: ${validationError}`)
+  }
+  return mappedTest
 }
 
 export const getMockTestsFromApi = async (): Promise<MockTest[]> => {
   if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from('mock_tests')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (!error && Array.isArray(data)) {
-        const mapped = data.map(mapDbTest).filter(Boolean) as MockTest[]
-        if (mapped.length) {
-          saveStoredMockTests(mapped)
-          return mapped
-        }
-      }
-    } catch {
-      // fallback to local storage below
-    }
+    const { data, error } = await supabase
+      .from('mock_tests')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    if (!Array.isArray(data)) throw new Error('The mock-test service returned an invalid response.')
+    const mapped = data.map(mapDbTest).filter((test): test is MockTest => test !== null)
+    saveStoredMockTests(mapped)
+    return mapped
   }
 
   const stored = getStoredMockTests()
@@ -207,6 +257,9 @@ export const getUserMockAttemptsFromApi = async (userId: string): Promise<MockAt
       accuracy: Number(row.accuracy ?? 0),
       paperType: test?.paperType ?? 'Prelims',
       subjectName: test?.subjectName ?? 'General',
+      assessmentMode: row.assessment_mode === 'official-pattern' ? 'official-pattern' : 'practice',
+      marksPerQuestion: Number(row.marks_per_question ?? 1),
+      negativeMarksPerWrong: Number(row.negative_marks_per_wrong ?? 0),
       submittedAt: String(row.submitted_at ?? new Date().toISOString()),
     }
   })
@@ -231,7 +284,7 @@ export const getStoredMockDrafts = (): MockTest[] => {
     }
 
     const parsed = JSON.parse(raw) as Partial<MockTest>[]
-    return parsed.map((item) => mapDbTest(item as Record<string, any>) ?? normalizeMockTest(item)).filter(Boolean) as MockTest[]
+    return parsed.map(normalizeMockTest).filter((test): test is MockTest => test !== null)
   } catch {
     return []
   }
@@ -256,6 +309,7 @@ const normalizeMockTest = (test: Partial<MockTest> | null | undefined): MockTest
     subjectId: test.subjectId ?? undefined,
     subjectName: test.subjectName ?? undefined,
     source: 'local',
+    assessmentMode: test.assessmentMode === 'official-pattern' ? 'official-pattern' : 'practice',
     questions: Array.isArray(test.questions) ? test.questions.map((question, index) => ({
       id: String(question.id ?? `${test.id ?? 'draft'}-q-${index + 1}`),
       subjectId: question.subjectId ?? test.subjectId,
@@ -265,6 +319,9 @@ const normalizeMockTest = (test: Partial<MockTest> | null | undefined): MockTest
       options: Array.isArray(question.options) && question.options.length ? question.options.map(String) : ['Option A', 'Option B', 'Option C', 'Option D'],
       correctIndex: Number(question.correctIndex ?? 0),
       explanation: String(question.explanation ?? 'Answer explanation'),
+      sourceTitle: question.sourceTitle,
+      sourceUrl: question.sourceUrl,
+      sourcePublishedAt: question.sourcePublishedAt,
     })) : [],
   }
 }
@@ -286,6 +343,8 @@ const generateUuid = (): string => {
 }
 
 export const publishMockTestToApi = async (test: MockTest): Promise<MockTest> => {
+  const validationError = getMockTestValidationError(test)
+  if (validationError) throw new Error(validationError)
   const targetId = isValidUuid(test.id) ? test.id : generateUuid()
   const normalizedTest: MockTest = {
     ...test,
@@ -293,37 +352,33 @@ export const publishMockTestToApi = async (test: MockTest): Promise<MockTest> =>
   }
 
   if (supabase) {
-    try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const userId = sessionData.session?.user?.id
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) throw sessionError
+    const userId = sessionData.session?.user?.id
 
-      const payload = {
-        id: targetId,
-        title: normalizedTest.title,
-        schedule: normalizedTest.schedule,
-        paper_type: normalizedTest.paperType,
-        subject_id: normalizedTest.subjectId ?? null,
-        subject_name: normalizedTest.subjectName ?? null,
-        duration_minutes: normalizedTest.durationMinutes,
-        questions: normalizedTest.questions,
-        created_by: userId ?? null,
-        created_at: normalizedTest.createdAt,
-      }
-
-      const { data, error } = await supabase.from('mock_tests').upsert(payload, { onConflict: 'id' }).select().single()
-
-      if (!error && data) {
-        const mapped = mapDbTest(data)
-        if (mapped) {
-          const current = getStoredMockTests()
-          const next = [mapped, ...current.filter((item) => item.id !== mapped.id && item.id !== test.id)].slice(0, 20)
-          saveStoredMockTests(next)
-          return mapped
-        }
-      }
-    } catch {
-      // fallback to local storage below
+    const payload = {
+      id: targetId,
+      title: normalizedTest.title,
+      schedule: normalizedTest.schedule,
+      paper_type: normalizedTest.paperType,
+      subject_id: normalizedTest.subjectId ?? null,
+      subject_name: normalizedTest.subjectName ?? null,
+      duration_minutes: normalizedTest.durationMinutes,
+      assessment_mode: normalizedTest.assessmentMode ?? 'practice',
+      questions: normalizedTest.questions,
+      created_by: userId ?? null,
+      created_at: normalizedTest.createdAt,
     }
+
+    const { data, error } = await supabase.from('mock_tests').upsert(payload, { onConflict: 'id' }).select().single()
+    if (error) throw error
+    if (!data) throw new Error('The mock-test service did not confirm the published assessment.')
+    const mapped = mapDbTest(data)
+    if (!mapped) throw new Error('The published assessment could not be read back from the service.')
+    const current = getStoredMockTests()
+    const next = [mapped, ...current.filter((item) => item.id !== mapped.id && item.id !== test.id)].slice(0, 20)
+    saveStoredMockTests(next)
+    return mapped
   }
 
   const current = getStoredMockTests()
@@ -335,21 +390,9 @@ export const publishMockTestToApi = async (test: MockTest): Promise<MockTest> =>
 export const updateMockTestToApi = async (test: MockTest): Promise<MockTest> => publishMockTestToApi(test)
 
 export const deleteMockTestFromApi = async (testId: string): Promise<boolean> => {
-  if (supabase) {
-    try {
-      if (isValidUuid(testId)) {
-        const { error } = await supabase.from('mock_tests').delete().eq('id', testId)
-        if (error) {
-          console.error('Failed to delete mock test from Supabase:', error)
-        } else {
-          const current = getStoredMockTests()
-          saveStoredMockTests(current.filter((item) => item.id !== testId))
-          return true
-        }
-      }
-    } catch {
-      // fallback below
-    }
+  if (supabase && isValidUuid(testId)) {
+    const { error } = await supabase.from('mock_tests').delete().eq('id', testId)
+    if (error) throw error
   }
 
   const current = getStoredMockTests()
@@ -360,8 +403,14 @@ export const deleteMockTestFromApi = async (testId: string): Promise<boolean> =>
 
 export const submitMockTestToApi = async ({ testId, answers, userId }: MockApiSubmission): Promise<MockApiResult> => {
   const tests = getStoredMockTests()
-  const test = tests.find((item) => item.id === testId) ?? defaultMockTests[0]
+  const test = tests.find((item) => item.id === testId) ?? defaultMockTests.find((item) => item.id === testId)
+  if (!test) throw new Error('The selected assessment could not be found. Reload the mock tests and try again.')
 
+  const validationError = getMockTestValidationError(test)
+  if (validationError) throw new Error(validationError)
+  if (supabase && !isValidUuid(test.id)) {
+    throw new Error('Publish this assessment to the connected account before submitting an attempt.')
+  }
   const total = test.questions.length
   let correct = 0
   let skipped = 0
@@ -378,49 +427,55 @@ export const submitMockTestToApi = async ({ testId, answers, userId }: MockApiSu
   })
 
   const wrong = total - correct - skipped
-  const score = correct
+  const assessmentMode = test.assessmentMode ?? 'practice'
+  const marksPerQuestion = 1
+  const negativeMarksPerWrong = assessmentMode === 'official-pattern' ? 1 / 3 : 0
+  const score = Number((correct * marksPerQuestion - wrong * negativeMarksPerWrong).toFixed(2))
   const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0
   const submittedAt = new Date().toISOString()
 
   if (supabase && isValidUuid(test.id)) {
-    try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const payloadUserId = userId ?? sessionData.session?.user?.id ?? null
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) throw sessionError
+    const payloadUserId = userId ?? sessionData.session?.user?.id ?? null
 
-      const { data, error } = await supabase
-        .from('mock_attempts')
-        .insert({
-          test_id: test.id,
-          user_id: payloadUserId,
-          score,
-          total,
-          correct,
-          wrong,
-          skipped,
-          accuracy,
-          submitted_at: submittedAt,
-        })
-        .select()
-        .single()
+    const { data, error } = await supabase
+      .from('mock_attempts')
+      .insert({
+        test_id: test.id,
+        user_id: payloadUserId,
+        score,
+        total,
+        correct,
+        wrong,
+        skipped,
+        accuracy,
+        assessment_mode: assessmentMode,
+        marks_per_question: marksPerQuestion,
+        negative_marks_per_wrong: negativeMarksPerWrong,
+        submitted_at: submittedAt,
+      })
+      .select()
+      .single()
+    if (error) throw error
+    if (!data) throw new Error('The assessment service did not confirm your submission.')
 
-      if (!error && data) {
-        return {
-          id: String(data.id),
-          testId: String(data.test_id ?? test.id),
-          testTitle: test.title,
-          score: Number(data.score ?? score),
-          total: Number(data.total ?? total),
-          correct: Number(data.correct ?? correct),
-          wrong: Number(data.wrong ?? wrong),
-          skipped: Number(data.skipped ?? skipped),
-          accuracy: Number(data.accuracy ?? accuracy),
-          submittedAt: String(data.submitted_at ?? submittedAt),
-          paperType: test.paperType,
-          message: userId ? `Result recorded for ${userId}` : 'Result processed successfully',
-        }
-      }
-    } catch {
-      // fallback below
+    return {
+      id: String(data.id),
+      testId: String(data.test_id ?? test.id),
+      testTitle: test.title,
+      score: Number(data.score ?? score),
+      total: Number(data.total ?? total),
+      correct: Number(data.correct ?? correct),
+      wrong: Number(data.wrong ?? wrong),
+      skipped: Number(data.skipped ?? skipped),
+      accuracy: Number(data.accuracy ?? accuracy),
+      submittedAt: String(data.submitted_at ?? submittedAt),
+      paperType: test.paperType,
+      message: userId ? `Result recorded for ${userId}` : 'Result processed successfully',
+      assessmentMode,
+      marksPerQuestion,
+      negativeMarksPerWrong,
     }
   }
 
@@ -437,5 +492,8 @@ export const submitMockTestToApi = async ({ testId, answers, userId }: MockApiSu
     submittedAt,
     paperType: test.paperType,
     message: userId ? `Result recorded for ${userId}` : 'Result processed successfully',
+    assessmentMode,
+    marksPerQuestion,
+    negativeMarksPerWrong,
   }
 }

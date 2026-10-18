@@ -11,8 +11,49 @@
   scrollbar-width: none;
 }
 
+.note-kind-badge {
+  display: inline-flex;
+  margin: 6px 0 0 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.note-topic-link {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.note-topic-link:hover {
+  text-decoration: underline;
+}
+
 .auth-shell *::-webkit-scrollbar {
   display: none;
+}
+
+.note-source-reference {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.note-source-reference a {
+  color: #1d4ed8;
+  font-weight: 600;
 }
 
 .auth-panel {
@@ -650,6 +691,54 @@
   margin-bottom: 18px;
 }
 
+.analytics-action-list {
+  display: grid;
+  gap: 10px;
+}
+
+.analytics-action-list button,
+.analytics-next-recommendation {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  background: #f8fafc;
+  color: #0f172a;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.analytics-action-list button:hover,
+.analytics-next-recommendation:hover {
+  border-color: rgba(37, 99, 235, 0.42);
+  background: #eff6ff;
+}
+
+.analytics-action-list button > span:first-child,
+.analytics-next-recommendation > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.analytics-action-list small,
+.analytics-next-recommendation small {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.analytics-action-list button > span:last-child,
+.analytics-next-recommendation > span:last-child {
+  color: #1d4ed8;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .analytics-tag {
   display: inline-flex;
   align-items: center;
@@ -723,6 +812,11 @@
   display: grid;
   justify-items: end;
   gap: 4px;
+}
+
+.analytics-attempt-score small {
+  color: #64748b;
+  font-size: 0.72rem;
 }
 
 .analytics-latest-highlight {
@@ -882,6 +976,25 @@
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 8px;
+}
+
+.notes-kind-field {
+  margin-top: 10px;
+}
+
+.notes-source-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.notes-source-fields > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #64748b;
+  font-size: 0.8rem;
+  line-height: 1.5;
 }
 
 .notes-library-controls {
@@ -1162,6 +1275,10 @@
 
 @media (max-width: 760px) {
   .notes-library-selects {
+    grid-template-columns: 1fr;
+  }
+
+  .notes-source-fields {
     grid-template-columns: 1fr;
   }
 
@@ -2669,6 +2786,122 @@
   width: 100%;
 }
 
+.planner-availability {
+  width: 100%;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.planner-availability legend {
+  padding: 0 6px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.planner-availability > p {
+  margin: 0 0 12px;
+  color: #64748b;
+  font-size: 0.84rem;
+}
+
+.planner-availability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(282px, 1fr));
+  gap: 8px;
+}
+
+.planner-availability-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(112px, 128px);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 54px;
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.planner-availability-row.available {
+  border-color: rgba(37, 99, 235, 0.25);
+  background: #eff6ff;
+}
+
+.planner-availability-row > label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.planner-availability-row .MuiFormControl-root {
+  min-width: 0;
+  width: 100%;
+}
+
+.planner-day-off {
+  color: #94a3b8;
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.planner-availability-summary {
+  margin-top: 12px;
+  color: #475569;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.planner-overdue-card {
+  border-color: rgba(217, 119, 6, 0.22);
+  background: linear-gradient(135deg, #fffbeb, #fff);
+}
+
+.planner-overdue-card .MuiCardContent-root > p {
+  margin: -4px 0 14px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.planner-overdue-list {
+  display: grid;
+  gap: 8px;
+}
+
+.planner-overdue-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid rgba(217, 119, 6, 0.15);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.planner-overdue-row > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.planner-overdue-row strong {
+  color: #0f172a;
+}
+
+.planner-overdue-row span,
+.planner-overdue-row small {
+  color: #64748b;
+}
+
 .planner-activity-card .MuiCardContent-root {
   display: grid;
   gap: 12px;
@@ -2771,6 +3004,16 @@
 
   .planner-session-actions {
     justify-content: flex-start;
+  }
+
+  .planner-overdue-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .planner-overdue-row .planner-session-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .topic-status-grid,
@@ -2928,6 +3171,32 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+}
+
+.question-import-panel {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.question-import-panel h3,
+.question-import-panel p {
+  margin: 0;
+}
+
+.question-import-panel p {
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.question-source-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
 }
 
 .custom-questions-builder {
@@ -3971,7 +4240,8 @@
 
   .nav-list {
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
   }
 
   .main-panel {

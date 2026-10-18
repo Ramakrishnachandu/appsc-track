@@ -61,6 +61,7 @@ export type StudyPlanSettings = {
   level: PreparationLevel
   medium: StudyMedium
   dailyHours: number
+  dayAvailability: number[]
   startDate: string
   targetDate: string | null
 }

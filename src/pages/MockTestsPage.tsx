@@ -109,6 +109,9 @@ export function MockTestsPage() {
         accuracy: result.accuracy,
         paperType: result.paperType,
         subjectName: currentTest.subjectName,
+        assessmentMode: result.assessmentMode,
+        marksPerQuestion: result.marksPerQuestion,
+        negativeMarksPerWrong: result.negativeMarksPerWrong,
         submittedAt: result.submittedAt,
       }
 
@@ -193,7 +196,7 @@ export function MockTestsPage() {
   return (
     <Box className="page-shell">
       <Alert severity="info">
-        Notification 37/2026 specifies 150 questions in 150 minutes for Screening and for each Mains paper, with a one-third penalty per wrong answer. These shorter in-app practice sets score correct answers only and do not apply negative marking; they are not previous-year questions.
+      Short practice sets remain practice-only. An assessment is shown as exam-pattern only when it has 150 questions, 150 minutes, and APPSC-source citations for every question; only that mode uses one-third negative marking. The app does not generate or verify official questions.
       </Alert>
 
       {loadError && <Alert severity="error">{loadError}</Alert>}
@@ -219,8 +222,8 @@ export function MockTestsPage() {
                 <strong>{currentTest ? `${currentTest.durationMinutes} min` : '—'}</strong>
               </div>
               <div className="summary-pill">
-                <span>Exam pattern</span>
-                <strong>MCQ</strong>
+                <span>Assessment mode</span>
+                <strong>{currentTest?.assessmentMode === 'official-pattern' ? 'Exam pattern' : 'Practice'}</strong>
               </div>
             </div>
 
@@ -254,6 +257,7 @@ export function MockTestsPage() {
                     >
                       <div className="mock-test-card-top">
                         <span className="subject-tag">{test.paperType}</span>
+                        <span className="subject-tag">{test.assessmentMode === 'official-pattern' ? 'Exam pattern' : 'Practice'}</span>
                         <strong>{test.durationMinutes} min</strong>
                       </div>
                       <h3>{test.title}</h3>
@@ -281,7 +285,10 @@ export function MockTestsPage() {
                 <div>
                   <span className="subject-detail-badge">Selected test</span>
                   <h3>{currentTest.title}</h3>
-                  <p>{currentTest.questions.length} questions · {currentTest.durationMinutes} minutes</p>
+                  <p>
+                    {currentTest.questions.length} questions · {currentTest.durationMinutes} minutes
+                    {currentTest.assessmentMode === 'official-pattern' ? ' · 1/3 mark deducted per wrong answer' : ' · no negative marking'}
+                  </p>
                 </div>
                 <Button variant="contained" onClick={startTest} disabled={isLoadingTests || currentTest.questions.length === 0}>
                   Start assessment
@@ -299,6 +306,11 @@ export function MockTestsPage() {
               <div>
                 <span className="subject-detail-badge">{isReviewing ? 'Assessment review' : 'Assessment in progress'}</span>
                 <h2>{currentTest.title}</h2>
+                <p className="assessment-scoring-note">
+                  {currentTest.assessmentMode === 'official-pattern'
+                    ? 'Exam-pattern scoring: +1 for correct, −1/3 for wrong, 0 for unanswered.'
+                    : 'Practice scoring: +1 for correct, 0 for wrong or unanswered.'}
+                </p>
               </div>
               <div className={remainingSeconds <= 60 && isStarted ? 'assessment-timer urgent' : 'assessment-timer'} aria-live="polite">
                 {isStarted ? formatTime(remainingSeconds) : 'Submitted'}
@@ -309,6 +321,7 @@ export function MockTestsPage() {
             {latestAttempt && !isStarted && (
               <Alert severity="success" className="assessment-result-banner">
                 Assessment submitted. You scored <strong>{latestAttempt.score} of {latestAttempt.total}</strong> ({resultAccuracy}% accuracy).
+                {latestAttempt.negativeMarksPerWrong ? ` ${latestAttempt.wrong} incorrect answer${latestAttempt.wrong === 1 ? '' : 's'} incurred a one-third-mark penalty each.` : ''}
               </Alert>
             )}
             {submitError && <Alert severity="error" className="assessment-result-banner">{submitError}</Alert>}
@@ -351,6 +364,13 @@ export function MockTestsPage() {
                       })}
                     </div>
                     {isReviewing && <p className="assessment-explanation"><strong>Explanation:</strong> {currentQuestion.explanation}</p>}
+                    {isReviewing && currentQuestion.sourceTitle && (
+                      <p className="assessment-explanation">
+                        <strong>Source:</strong> {currentQuestion.sourceTitle}
+                        {currentQuestion.sourcePublishedAt && ` · ${currentQuestion.sourcePublishedAt}`}
+                        {currentQuestion.sourceUrl && <> · <a href={currentQuestion.sourceUrl} target="_blank" rel="noreferrer">Open source</a></>}
+                      </p>
+                    )}
                   </>
                 )}
 

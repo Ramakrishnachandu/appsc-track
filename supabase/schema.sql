@@ -77,6 +77,11 @@ create table if not exists public.notes (
   subject_id text,
   subject_name text,
   paper_type text not null default 'Prelims' check (paper_type in ('Prelims', 'Mains')),
+  kind text not null default 'revision' check (kind in ('revision', 'current-affairs')),
+  topic_id text,
+  source_title text,
+  source_url text,
+  source_published_at date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -104,6 +109,7 @@ create table if not exists public.mock_tests (
   subject_id text,
   subject_name text,
   duration_minutes integer not null default 30,
+  assessment_mode text not null default 'practice' check (assessment_mode in ('practice', 'official-pattern')),
   questions jsonb not null default '[]'::jsonb,
   created_by uuid not null references public.profiles(id) on delete set null,
   created_at timestamptz not null default now()
@@ -113,12 +119,15 @@ create table if not exists public.mock_attempts (
   id uuid primary key default uuid_generate_v4(),
   test_id uuid not null references public.mock_tests(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
-  score integer not null default 0,
+  score numeric(7,2) not null default 0,
   total integer not null default 0,
   correct integer not null default 0,
   wrong integer not null default 0,
   skipped integer not null default 0,
   accuracy integer not null default 0,
+  assessment_mode text not null default 'practice' check (assessment_mode in ('practice', 'official-pattern')),
+  marks_per_question numeric(7,6) not null default 1,
+  negative_marks_per_wrong numeric(7,6) not null default 0,
   submitted_at timestamptz not null default now()
 );
 

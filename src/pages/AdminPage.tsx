@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Box, Button, Card, CardContent, TextField } from '@mui/material'
+import { useEffect, useMemo, useState } from 'react'
+import { Alert, Box, Button, Card, CardContent, TextField } from '@mui/material'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   getConfiguredSyllabusData,
@@ -10,6 +10,7 @@ import {
 import {
   buildMockQuestionSet,
   deleteMockTestFromApi,
+  getMockTestValidationError,
   getStoredMockDrafts,
   publishMockTestToApi,
   saveStoredMockDrafts,
@@ -36,15 +37,7 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
   const resolvedSection: 'content' | 'mock' =
     initialSection ?? (location.pathname.includes('/mock') ? 'mock' : 'content')
 
-  const [adminSection, setAdminSection] = useState<'content' | 'mock'>(resolvedSection)
-
-  useEffect(() => {
-    if (location.pathname.includes('/mock')) {
-      setAdminSection('mock')
-    } else if (location.pathname.includes('/content')) {
-      setAdminSection('content')
-    }
-  }, [location.pathname])
+  const adminSection = resolvedSection
 
   const defaultConfig = getConfiguredSyllabusData()
   const [config, setConfig] = useState(defaultConfig)
@@ -67,13 +60,15 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
   const [mockTests, setMockTests] = useState<MockTest[]>(() => getStoredMockTests())
   const [draftTests, setDraftTests] = useState<MockTest[]>(() => getStoredMockDrafts())
   const [editingTestId, setEditingTestId] = useState<string | null>(null)
-  // const [adminSection, setAdminSection] = useState<'content' | 'mock'>(initialSection)
 
   type DraftQuestion = {
     prompt: string
     options: string[]
     correctIndex: number
     explanation: string
+    sourceTitle?: string
+    sourceUrl?: string
+    sourcePublishedAt?: string
   }
 
   const createBlankQuestion = (): DraftQuestion => ({
@@ -90,10 +85,12 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
     schedule: 'Daily' as 'Daily' | 'Weekly',
     durationMinutes: 30,
     count: 5,
+    assessmentMode: 'practice' as 'practice' | 'official-pattern',
   })
   const [customQuestions, setCustomQuestions] = useState<DraftQuestion[]>([createBlankQuestion()])
+  const [questionImport, setQuestionImport] = useState('')
 
-  const subjectOptions = [...config.prelimsSubjects, ...config.mainsSubjects]
+  const subjectOptions = useMemo(() => [...config.prelimsSubjects, ...config.mainsSubjects], [config.mainsSubjects, config.prelimsSubjects])
 
   const resetMockDraftForm = () => {
     setEditingTestId(null)
@@ -104,19 +101,11 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
       schedule: 'Daily',
       durationMinutes: 30,
       count: 5,
+      assessmentMode: 'practice',
     })
     setCustomQuestions([createBlankQuestion()])
+    setQuestionImport('')
   }
-
-  useEffect(() => {
-    setMockTests(getStoredMockTests())
-  }, [])
-
-  useEffect(() => {
-    if (!draftTest.subjectId && subjectOptions[0]) {
-      setDraftTest((current) => ({ ...current, subjectId: subjectOptions[0].id }))
-    }
-  }, [draftTest.subjectId, subjectOptions])
 
   const buildCustomQuestionSet = (): MockQuestion[] => {
     const selectedSubject = subjectOptions.find((subject) => subject.id === draftTest.subjectId) ?? subjectOptions[0]
@@ -146,10 +135,52 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
         options: safeOptions,
         correctIndex,
         explanation: question.explanation.trim() || 'Answer explained in the lesson notes.',
+        sourceTitle: question.sourceTitle?.trim() || undefined,
+        sourceUrl: question.sourceUrl?.trim() || undefined,
+        sourcePublishedAt: question.sourcePublishedAt || undefined,
       })
     })
 
     return typedQuestions
+  }
+
+  const importQuestions = () => {
+    try {
+      const parsed: unknown = JSON.parse(questionImport)
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error('Paste a JSON array containing at least one question.')
+      }
+      const importedQuestions = parsed.map((entry, index): DraftQuestion => {
+        if (!entry || typeof entry !== 'object') throw new Error(`Question ${index + 1} must be an object.`)
+        const question = entry as Record<string, unknown>
+        if (
+          typeof question.prompt !== 'string'
+          || !Array.isArray(question.options)
+          || question.options.length !== 4
+          || !question.options.every((option) => typeof option === 'string')
+          || typeof question.correctIndex !== 'number'
+          || !Number.isInteger(question.correctIndex)
+          || question.correctIndex < 0
+          || question.correctIndex > 3
+        ) {
+          throw new Error(`Question ${index + 1} needs a prompt, four options, and a correctIndex from 0 to 3.`)
+        }
+        return {
+          prompt: question.prompt,
+          options: question.options,
+          correctIndex: question.correctIndex,
+          explanation: typeof question.explanation === 'string' ? question.explanation : '',
+          sourceTitle: typeof question.sourceTitle === 'string' ? question.sourceTitle : '',
+          sourceUrl: typeof question.sourceUrl === 'string' ? question.sourceUrl : '',
+          sourcePublishedAt: typeof question.sourcePublishedAt === 'string' ? question.sourcePublishedAt : '',
+        }
+      })
+      setCustomQuestions(importedQuestions)
+      setDraftTest((current) => ({ ...current, count: importedQuestions.length }))
+      setStatusMessage(`${importedQuestions.length} questions imported. Review citations and answer keys before publishing.`)
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to import questions. Check the JSON format.')
+    }
   }
 
   const createMockTestFromDraft = (): MockTest => {
@@ -189,6 +220,7 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
       subjectId: selectedSubject.id,
       subjectName: selectedSubject.name,
       source: 'api',
+      assessmentMode: draftTest.assessmentMode,
       questions: finalQuestions,
     }
   }
@@ -196,19 +228,19 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
   const addMockTest = async () => {
     try {
       const nextTest = createMockTestFromDraft()
+      const validationError = getMockTestValidationError(nextTest)
+      if (validationError) {
+        setStatusMessage(validationError)
+        return
+      }
       const published = editingTestId ? await updateMockTestToApi(nextTest) : await publishMockTestToApi(nextTest)
       const nextTests = [published, ...mockTests.filter((item) => item.id !== published.id)]
       setMockTests(nextTests)
       saveStoredMockTests(nextTests)
       setStatusMessage(`${draftTest.paperType} mock test ${editingTestId ? 'updated' : 'published'} successfully.`)
       resetMockDraftForm()
-    } catch {
-      const nextTest = createMockTestFromDraft()
-      const nextTests = [nextTest, ...mockTests.filter((item) => item.id !== nextTest.id)]
-      setMockTests(nextTests)
-      saveStoredMockTests(nextTests)
-      setStatusMessage(`${draftTest.paperType} mock test saved locally for sync.`)
-      resetMockDraftForm()
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to publish this assessment.')
     }
   }
 
@@ -233,14 +265,19 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
       subjectId: test.subjectId ?? subjectOptions[0]?.id ?? '',
       schedule: test.schedule,
       durationMinutes: test.durationMinutes,
-      count: Math.min(10, Math.max(1, test.questions.length || 5)),
+      count: Math.min(150, Math.max(1, test.questions.length || 5)),
+      assessmentMode: test.assessmentMode ?? 'practice',
     })
     setCustomQuestions(test.questions.map((question) => ({
       prompt: question.prompt,
       options: question.options,
       correctIndex: question.correctIndex,
       explanation: question.explanation,
+      sourceTitle: question.sourceTitle,
+      sourceUrl: question.sourceUrl,
+      sourcePublishedAt: question.sourcePublishedAt,
     })))
+    setQuestionImport('')
     setStatusMessage(`Draft loaded: ${test.title}`)
   }
 
@@ -252,15 +289,18 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
       subjectId: test.subjectId ?? subjectOptions[0]?.id ?? '',
       schedule: test.schedule,
       durationMinutes: test.durationMinutes,
-      count: Math.min(10, Math.max(1, test.questions.length || 5)),
+      count: Math.min(150, Math.max(1, test.questions.length || 5)),
+      assessmentMode: test.assessmentMode ?? 'practice',
     })
     setCustomQuestions(test.questions.map((question) => ({
       prompt: question.prompt,
       options: question.options,
       correctIndex: question.correctIndex,
       explanation: question.explanation,
+      sourceTitle: question.sourceTitle,
+      sourceUrl: question.sourceUrl,
+      sourcePublishedAt: question.sourcePublishedAt,
     })))
-    setAdminSection('mock')
     navigate('/admin/mock-tests')
     setStatusMessage(`Editing ${test.title}. Update changes and publish when ready.`)
   }
@@ -288,12 +328,7 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
   ]
 
   const selectedSubject = [...config.prelimsSubjects, ...config.mainsSubjects].find((subject) => subject.id === selectedSubjectId)
-
-  useEffect(() => {
-    if (!selectedSubject && config.prelimsSubjects[0]) {
-      setSelectedSubjectId(config.prelimsSubjects[0].id)
-    }
-  }, [config, selectedSubject])
+    ?? config.prelimsSubjects[0]
 
   const handleSubjectSelect = (group: 'Prelims' | 'Mains', id: string) => {
     void group
@@ -445,7 +480,7 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
                           <button
                             key={subject.id}
                             type="button"
-                            className={selectedSubjectId === subject.id ? 'admin-subject-card active' : 'admin-subject-card'}
+                            className={selectedSubject?.id === subject.id ? 'admin-subject-card active' : 'admin-subject-card'}
                             onClick={() => handleSubjectSelect(group.title as 'Prelims' | 'Mains', subject.id)}
                           >
                             <span>{subject.name}</span>
@@ -688,7 +723,7 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
                     <div className="native-select-field">
                       <label>Subject</label>
                       <select
-                        value={draftTest.subjectId}
+                        value={subjectOptions.some((subject) => subject.id === draftTest.subjectId) ? draftTest.subjectId : subjectOptions[0]?.id ?? ''}
                         onChange={(event) => setDraftTest((current) => ({ ...current, subjectId: event.target.value }))}
                       >
                         {subjectOptions.map((subject) => (
@@ -708,11 +743,27 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
                       </select>
                     </div>
 
+                    <div className="native-select-field">
+                      <label htmlFor="assessment-mode">Assessment mode</label>
+                      <select
+                        id="assessment-mode"
+                        value={draftTest.assessmentMode}
+                        onChange={(event) => setDraftTest((current) => ({
+                          ...current,
+                          assessmentMode: event.target.value === 'official-pattern' ? 'official-pattern' : 'practice',
+                          durationMinutes: event.target.value === 'official-pattern' ? 150 : current.durationMinutes,
+                        }))}
+                      >
+                        <option value="practice">Short practice</option>
+                        <option value="official-pattern">Official exam pattern (150 × 150)</option>
+                      </select>
+                    </div>
+
                     <TextField
                       label="Duration (min)"
                       type="number"
                       value={draftTest.durationMinutes}
-                      onChange={(event) => setDraftTest((current) => ({ ...current, durationMinutes: Number(event.target.value) || 30 }))}
+                      onChange={(event) => setDraftTest((current) => ({ ...current, durationMinutes: Number(event.target.value) || 1 }))}
                       fullWidth
                       margin="normal"
                     />
@@ -721,10 +772,33 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
                       label="Question count"
                       type="number"
                       value={draftTest.count}
-                      onChange={(event) => setDraftTest((current) => ({ ...current, count: Math.min(10, Math.max(1, Number(event.target.value) || 5)) }))}
+                      onChange={(event) => setDraftTest((current) => ({ ...current, count: Math.min(150, Math.max(1, Number(event.target.value) || 1)) }))}
                       fullWidth
                       margin="normal"
                     />
+                  </div>
+
+                  {draftTest.assessmentMode === 'official-pattern' && (
+                    <Alert severity="warning" sx={{ mb: 2 }}>
+                      Only use questions verified against APPSC material. Publishing requires 150 questions, 150 minutes, and a title, publication date, and official APPSC HTTPS URL for every question. The app will not generate or verify official questions.
+                    </Alert>
+                  )}
+
+                  <div className="question-import-panel">
+                    <h3>Import source-attributed questions (JSON)</h3>
+                    <p>Paste an array of question objects with <code>prompt</code>, four <code>options</code>, numeric <code>correctIndex</code>, optional <code>explanation</code>, <code>sourceTitle</code>, <code>sourceUrl</code>, and <code>sourcePublishedAt</code> (YYYY-MM-DD). Imported content remains your responsibility to verify.</p>
+                    <TextField
+                      label="Question JSON"
+                      value={questionImport}
+                      onChange={(event) => setQuestionImport(event.target.value)}
+                      fullWidth
+                      multiline
+                      minRows={4}
+                      placeholder={'[{"prompt":"...","options":["A","B","C","D"],"correctIndex":0,"sourceTitle":"...","sourceUrl":"https://psc.ap.gov.in/...","sourcePublishedAt":"2026-01-01"}]'}
+                    />
+                    <Button variant="outlined" sx={{ mt: 1 }} onClick={importQuestions} disabled={!questionImport.trim()}>
+                      Import and replace questions
+                    </Button>
                   </div>
 
                   <div className="custom-questions-builder">
@@ -822,6 +896,40 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
                           rows={2}
                           margin="normal"
                         />
+                        <div className="question-source-fields">
+                          <TextField
+                            label="Source title"
+                            value={question.sourceTitle ?? ''}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setCustomQuestions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, sourceTitle: value } : item))
+                            }}
+                            fullWidth
+                            margin="dense"
+                          />
+                          <TextField
+                            label="Source URL"
+                            value={question.sourceUrl ?? ''}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setCustomQuestions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, sourceUrl: value } : item))
+                            }}
+                            fullWidth
+                            margin="dense"
+                          />
+                          <TextField
+                            label="Publication date"
+                            type="date"
+                            value={question.sourcePublishedAt ?? ''}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setCustomQuestions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, sourcePublishedAt: value } : item))
+                            }}
+                            slotProps={{ inputLabel: { shrink: true } }}
+                            fullWidth
+                            margin="dense"
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>

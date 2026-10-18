@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Alert, Box, Button, Card, CardContent, CircularProgress, LinearProgress } from '@mui/material'
 import { getAllSyllabusTopics, getCurrentGroup2Syllabus } from '../data/group2Syllabus'
 import { getUserMockAttemptsFromApi } from '../lib/mockTestApi'
-import { addDaysToDateKey, getLocalDateKey, getTopicProgress } from '../lib/studyPlanner'
+import { addDaysToDateKey, getLocalDateKey, getRevisionSessions, getStudyRecommendation, getTopicProgress } from '../lib/studyPlanner'
 import { useAppStore } from '../store/useAppStore'
 import { useStudyPlanStore } from '../store/useStudyPlanStore'
 import type { MockAttempt } from '../data/dashboardData'
@@ -50,6 +50,9 @@ export function AnalyticsPage() {
   }
 
   const topics = getAllSyllabusTopics()
+  const topicsById = new Map(topics.map((topic) => [topic.id, topic]))
+  const dueRevisions = getRevisionSessions(plan, today).filter((session) => session.overdue || session.dueToday)
+  const nextStudyRecommendation = getStudyRecommendation(plan, today)
   const completedTopics = plan.topicProgress.filter((progress) => progress.status === 'completed').length
   const syllabusCompletion = topics.length ? Math.round((completedTopics / topics.length) * 100) : 0
   const recordedSessions = plan.sessions.filter((session) => session.status === 'completed')
@@ -127,7 +130,7 @@ export function AnalyticsPage() {
           { label: 'Syllabus completion', value: `${syllabusCompletion}%`, caption: `${completedTopics} of ${topics.length} topics complete` },
           { label: 'Recorded study time', value: formatHours(totalStudySeconds), caption: `${recordedSessions.length} completed timer sessions` },
           { label: 'Topic-check accuracy', value: quizAccuracy === null ? 'No data' : `${quizAccuracy}%`, caption: `${plan.quizAttempts.length} answers recorded` },
-          { label: 'Mock test accuracy', value: mockAccuracy === null ? 'No data' : `${mockAccuracy}%`, caption: `${mockAttempts.length} tests / ${mockQuestions} questions` },
+          { label: 'Mock test accuracy', value: mockAccuracy === null ? 'No data' : `${mockAccuracy}%`, caption: `${mockAttempts.length} recent attempts / ${mockQuestions} questions` },
           { label: 'Revision completion', value: revisionRate === null ? 'No data' : `${revisionRate}%`, caption: `${completedRevisions} of ${revisionSessions.length} scheduled reviews` },
         ].map((metric) => (
           <Card key={metric.label} className="panel-card analytics-summary-card">
@@ -139,6 +142,39 @@ export function AnalyticsPage() {
           </Card>
         ))}
       </div>
+
+      <Card className="panel-card analytics-next-actions">
+        <CardContent>
+          <div className="analytics-section-heading">
+            <h2>Recommended next actions</h2>
+            <div className="analytics-tag">{dueRevisions.length ? `${dueRevisions.length} revision${dueRevisions.length === 1 ? '' : 's'} due` : 'Based on your plan'}</div>
+          </div>
+          {dueRevisions.length ? (
+            <div className="analytics-action-list">
+              {dueRevisions.slice(0, 4).map((session) => {
+                const topic = topicsById.get(session.topicId)
+                return (
+                  <button key={session.id} type="button" onClick={() => navigate(`/study-plan?topic=${encodeURIComponent(session.topicId)}`)}>
+                    <span><strong>{topic?.title ?? 'Syllabus revision'}</strong><small>{session.overdue ? `Overdue since ${session.date}` : 'Scheduled for today'} · {session.plannedMinutes} min</small></span>
+                    <span>Open revision</span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : nextStudyRecommendation ? (
+            <button
+              type="button"
+              className="analytics-next-recommendation"
+              onClick={() => navigate(`/study-plan?topic=${encodeURIComponent(nextStudyRecommendation.session.topicId)}`)}
+            >
+              <span><strong>{topicsById.get(nextStudyRecommendation.session.topicId)?.title ?? 'Next study session'}</strong><small>{nextStudyRecommendation.reason} · {nextStudyRecommendation.session.plannedMinutes} min</small></span>
+              <span>Open study plan</span>
+            </button>
+          ) : (
+            <p className="analytics-empty-state">No upcoming planned sessions. Add or generate study sessions to get a personalized next step.</p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="content-grid analytics-grid">
         <Card className="panel-card">
@@ -188,7 +224,7 @@ export function AnalyticsPage() {
               {mockAttempts.slice(0, 5).map((attempt) => (
                 <div className="analytics-attempt-item" key={attempt.id}>
                   <div><strong>{attempt.testTitle}</strong><p>{attempt.paperType} / {attempt.subjectName}</p></div>
-                  <div className="analytics-attempt-score"><span>{attempt.score}/{attempt.total}</span><strong>{attempt.accuracy ?? 0}%</strong></div>
+                  <div className="analytics-attempt-score"><span>{attempt.score} / {attempt.total} marks</span><strong>{attempt.accuracy ?? 0}%</strong><small>{attempt.assessmentMode === 'official-pattern' ? 'Exam pattern' : 'Practice'}</small></div>
                 </div>
               ))}
             </div>

@@ -51,6 +51,9 @@ export type MockQuestion = {
   options: string[]
   correctIndex: number
   explanation: string
+  sourceTitle?: string
+  sourceUrl?: string
+  sourcePublishedAt?: string
 }
 
 export type MockTest = {
@@ -63,6 +66,7 @@ export type MockTest = {
   subjectId?: string
   subjectName?: string
   source?: 'local' | 'api'
+  assessmentMode?: 'practice' | 'official-pattern'
   questions: MockQuestion[]
 }
 
@@ -78,6 +82,9 @@ export type MockAttempt = {
   accuracy?: number
   paperType?: MockPaperType
   subjectName?: string
+  assessmentMode?: 'practice' | 'official-pattern'
+  marksPerQuestion?: number
+  negativeMarksPerWrong?: number
   submittedAt: string
 }
 
@@ -499,6 +506,7 @@ const normalizeMockTest = (test: Partial<MockTest> | null | undefined): MockTest
     subjectId: test.subjectId ?? undefined,
     subjectName: test.subjectName ?? undefined,
     source: test.source ?? 'local',
+    assessmentMode: test.assessmentMode === 'official-pattern' ? 'official-pattern' : 'practice',
     questions: Array.isArray(test.questions) ? test.questions.map((question) => ({
       id: question.id ?? `${test.id}-q-${Math.random()}`,
       subjectId: question.subjectId ?? test.subjectId,
@@ -508,6 +516,9 @@ const normalizeMockTest = (test: Partial<MockTest> | null | undefined): MockTest
       options: Array.isArray(question.options) && question.options.length ? question.options : ['Option A', 'Option B', 'Option C', 'Option D'],
       correctIndex: Number(question.correctIndex ?? 0),
       explanation: question.explanation ?? 'Answer explanation',
+      sourceTitle: question.sourceTitle,
+      sourceUrl: question.sourceUrl,
+      sourcePublishedAt: question.sourcePublishedAt,
     })) : [],
   }
 }

@@ -6,6 +6,7 @@ import { getTopicPracticeQuestions } from '../data/topicPracticeQuestions'
 import { getUserMockAttemptsFromApi } from '../lib/mockTestApi'
 import {
   addDaysToDateKey,
+  getDailyCapacityMinutes,
   getLocalDateKey,
   getRevisionSessions,
   getSessionsInPeriod,
@@ -90,6 +91,7 @@ export function DashboardPage() {
   const weekSessions = getSessionsInPeriod(plan.sessions, 'week', today)
   const todayPlannedMinutes = todaySessions.filter((session) => session.status !== 'skipped').reduce((sum, session) => sum + session.plannedMinutes, 0)
   const todayActualSeconds = todaySessions.reduce((sum, session) => sum + (session.actualSeconds ?? 0), 0)
+  const todayCapacityMinutes = getDailyCapacityMinutes(plan.settings, today)
   const weekCompleted = weekSessions.filter((session) => session.status === 'completed')
   const weekActualSeconds = weekCompleted.reduce((sum, session) => sum + (session.actualSeconds ?? 0), 0)
   const completedDays = new Set(plan.sessions.filter((session) => session.status === 'completed').map((session) => session.date))
@@ -160,8 +162,8 @@ export function DashboardPage() {
       <div className="dashboard-study-metrics">
         <div className="dashboard-study-metric">
           <span>Today's study time</span>
-          <strong>{formatMinutes(Math.floor(todayActualSeconds / 60))} <small>/ {formatMinutes(plan.settings.dailyHours * 60)}</small></strong>
-          <LinearProgress variant="determinate" value={Math.min(100, (todayActualSeconds / 60 / (plan.settings.dailyHours * 60)) * 100)} />
+          <strong>{formatMinutes(Math.floor(todayActualSeconds / 60))} <small>/ {formatMinutes(todayCapacityMinutes)}</small></strong>
+          <LinearProgress variant="determinate" value={todayCapacityMinutes ? Math.min(100, (todayActualSeconds / 60 / todayCapacityMinutes) * 100) : 0} />
         </div>
         <div className="dashboard-study-metric">
           <span>Overall syllabus</span>
@@ -217,11 +219,11 @@ export function DashboardPage() {
               })}
             </div>
           ) : (
-            <p className="dashboard-empty-copy">No sessions scheduled for today. Choose a topic in your study plan to get started.</p>
+            <p className="dashboard-empty-copy">{todayCapacityMinutes ? 'No sessions scheduled for today. Choose a topic in your study plan to get started.' : 'Today is marked as a rest day in your weekly availability.'}</p>
           )}
           <div className="dashboard-actual-summary">
             <span>Completed study time</span>
-            <strong>{formatMinutes(Math.floor(todayActualSeconds / 60))} / {formatMinutes(plan.settings.dailyHours * 60)}</strong>
+            <strong>{formatMinutes(Math.floor(todayActualSeconds / 60))} / {formatMinutes(todayCapacityMinutes)}</strong>
           </div>
         </section>
 

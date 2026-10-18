@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   CircularProgress,
   FormControlLabel,
   IconButton,
@@ -38,6 +39,7 @@ import {
   getRevisionSessions,
   getSessionsInPeriod,
   getStudyRecommendation,
+  getSuggestedRescheduleDate,
   getTopicById,
   getTopicProgress,
   pauseStudyTimer,
@@ -45,7 +47,9 @@ import {
   reschedulePlanSession,
   resumeStudyTimer,
   setTopicCompleted,
+  skipPlanSession,
   updateTopicProgress,
+  WEEKDAY_LABELS,
 } from '../lib/studyPlanner'
 import { isSupabaseConfigured } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
@@ -102,12 +106,16 @@ function StudyPlanSettingsForm({ settings, onApply, saving }: {
 }) {
   const [draft, setDraft] = useState(settings)
   const today = getLocalDateKey()
+  const availableDayCount = draft.dayAvailability.filter((hours) => hours > 0).length
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!availableDayCount) return
+    const dayAvailability = draft.dayAvailability.map((hours) => Math.min(16, Math.max(0, Number(hours) || 0)))
     onApply({
       ...draft,
-      dailyHours: Math.min(16, Math.max(0.5, Number(draft.dailyHours) || 0.5)),
+      dayAvailability,
+      dailyHours: Number((dayAvailability.reduce((sum, hours) => sum + hours, 0) / availableDayCount).toFixed(1)),
       startDate: today,
       targetDate: draft.targetDate && draft.targetDate >= today ? draft.targetDate : null,
     })
@@ -144,13 +152,6 @@ function StudyPlanSettingsForm({ settings, onApply, saving }: {
           <MenuItem value="bilingual">Telugu + English</MenuItem>
         </TextField>
         <TextField
-          label="Study hours per day"
-          type="number"
-          value={draft.dailyHours}
-          onChange={(event) => setDraft((current) => ({ ...current, dailyHours: Number(event.target.value) }))}
-          slotProps={{ htmlInput: { min: 0.5, max: 16, step: 0.5 } }}
-        />
-        <TextField
           label="Target date (optional)"
           type="date"
           value={draft.targetDate ?? ''}
@@ -158,8 +159,57 @@ function StudyPlanSettingsForm({ settings, onApply, saving }: {
           slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: today } }}
         />
       </div>
+      <fieldset className="planner-availability">
+        <legend>Weekly availability</legend>
+        <p>Select at least one study day. Each selected day needs 0.5 to 16 hours.</p>
+        <div className="planner-availability-grid">
+          {WEEKDAY_LABELS.map((day, dayIndex) => {
+            const hours = draft.dayAvailability[dayIndex] ?? 0
+            return (
+              <div className={hours > 0 ? 'planner-availability-row available' : 'planner-availability-row'} key={day}>
+                <label>
+                  <Checkbox
+                    checked={hours > 0}
+                    onChange={(_event, checked) => setDraft((current) => ({
+                      ...current,
+                      dayAvailability: current.dayAvailability.map((value, index) => index === dayIndex
+                        ? checked ? Math.min(16, Math.max(0.5, current.dailyHours || 4)) : 0
+                        : value),
+                    }))}
+                    slotProps={{ input: { 'aria-label': `Study on ${day}` } }}
+                    size="small"
+                  />
+                  <span>{day}</span>
+                </label>
+                {hours > 0 ? (
+                  <TextField
+                    label={`${day} hours`}
+                    type="number"
+                    size="small"
+                    required
+                    value={hours}
+                    onChange={(event) => {
+                      const nextHours = Number(event.target.value)
+                      setDraft((current) => ({
+                        ...current,
+                        dayAvailability: current.dayAvailability.map((value, index) => index === dayIndex
+                          ? Math.min(16, Math.max(0.5, nextHours || 0.5))
+                          : value),
+                      }))
+                    }}
+                    slotProps={{ htmlInput: { min: 0.5, max: 16, step: 0.5 } }}
+                  />
+                ) : <span className="planner-day-off">Rest day</span>}
+              </div>
+            )
+          })}
+        </div>
+        <div className="planner-availability-summary">
+          {availableDayCount} study days · {draft.dayAvailability.reduce((sum, hours) => sum + hours, 0)} hours per week
+        </div>
+      </fieldset>
       <p className="planner-settings-note">The preferred medium is saved with your plan. Planner labels and catalog text currently remain in English; this selection does not translate content.</p>
-      <Button type="submit" variant="contained" disabled={saving}>Recalculate plan</Button>
+      <Button type="submit" variant="contained" disabled={saving || !availableDayCount}>Recalculate plan</Button>
     </form>
   )
 }
@@ -420,6 +470,10 @@ export function StudyPlanPage() {
     if (paperFilter === 'all') return true
     return getTopicContext(session.topicId)?.paper.id === paperFilter
   })
+  const overdueSessions = plan.sessions
+    .filter((session) => session.status === 'planned' && session.date < today)
+    .filter((session) => paperFilter === 'all' || getTopicContext(session.topicId)?.paper.id === paperFilter)
+    .sort((first, second) => first.date.localeCompare(second.date))
   const recommendation = getStudyRecommendation(plan, today)
   const upcomingSession = recommendation?.session ?? null
   const selectedSession = filteredSessions.find((session) => session.id === selectedSessionId)
@@ -561,7 +615,7 @@ export function StudyPlanPage() {
 
       {plan.settings.targetDate && projectedFinish && (
         <Alert severity={targetOverrunDays ? 'warning' : 'success'}>
-          At {plan.settings.dailyHours} study hours per day, the remaining topic schedule currently projects to {formatPlanDate(projectedFinish)}.
+          At an average of {plan.settings.dailyHours} study hours per available day, the remaining topic schedule currently projects to {formatPlanDate(projectedFinish)}.
           {targetOverrunDays
             ? ` That is ${targetOverrunDays} days after your target; increase daily hours or move the target date to keep the plan realistic.`
             : ` Your target date is ${formatPlanDate(plan.settings.targetDate)}.`}
@@ -570,6 +624,60 @@ export function StudyPlanPage() {
 
       {error && <Alert severity="error">{error} {isSupabaseConfigured ? 'Check your Supabase migration and connection.' : 'Demo progress is saved only in this browser.'}</Alert>}
       {saving && <div className="planner-save-status" role="status">Saving your plan...</div>}
+
+      {overdueSessions.length > 0 && (
+        <Card className="panel-card planner-overdue-card">
+          <CardContent>
+            <div className="planner-section-heading">
+              <div>
+                <span className="subject-detail-badge">Your plan, your pace</span>
+                <h2>{overdueSessions.length} missed session{overdueSessions.length === 1 ? '' : 's'} to resolve</h2>
+              </div>
+            </div>
+            <p>Nothing has been moved automatically. Rescheduling keeps the original date in your history; skipping records that you chose not to do it.</p>
+            <div className="planner-overdue-list">
+              {overdueSessions.map((session) => {
+                const topic = getTopicById(session.topicId)
+                const suggestedDate = getSuggestedRescheduleDate(plan, session.id, today)
+                if (!topic) return null
+                return (
+                  <div className="planner-overdue-row" key={session.id}>
+                    <div>
+                      <strong>{topic.title}</strong>
+                      <span>{session.kind} · {formatMinutes(session.plannedMinutes)} · was due {formatPlanDate(session.date)}</span>
+                      {suggestedDate && <small>Suggested: {formatPlanDate(suggestedDate)}</small>}
+                    </div>
+                    <div className="planner-session-actions">
+                      <Button
+                        size="small"
+                        variant="contained"
+                        disabled={!suggestedDate || saving}
+                        onClick={() => {
+                          if (!suggestedDate) return
+                          void updatePlan((current) => reschedulePlanSession(current, session.id, suggestedDate))
+                        }}
+                      >
+                        {suggestedDate ? 'Accept suggestion' : 'No free day available'}
+                      </Button>
+                      <Button
+                        size="small"
+                        color="inherit"
+                        disabled={saving}
+                        onClick={() => {
+                          if (!window.confirm('Mark this missed session as skipped? Its history will be retained.')) return
+                          void updatePlan((current) => skipPlanSession(current, session.id))
+                        }}
+                      >
+                        Skip
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="planner-summary-grid">
         <div className="planner-summary-item"><span>Overall syllabus</span><strong>{overallPercent}%</strong><LinearProgress variant="determinate" value={overallPercent} /></div>
@@ -698,7 +806,7 @@ export function StudyPlanPage() {
 
       <Card className="panel-card planner-settings-card">
         <CardContent>
-          <StudyPlanSettingsForm key={`${plan.settings.level}-${plan.settings.medium}-${plan.settings.dailyHours}-${plan.settings.targetDate}`} settings={plan.settings} onApply={handleRecalculate} saving={saving} />
+          <StudyPlanSettingsForm key={`${plan.settings.level}-${plan.settings.medium}-${plan.settings.dailyHours}-${plan.settings.targetDate}-${plan.settings.dayAvailability.join(',')}`} settings={plan.settings} onApply={handleRecalculate} saving={saving} />
         </CardContent>
       </Card>
 
