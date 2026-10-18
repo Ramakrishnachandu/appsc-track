@@ -1,195 +1,181 @@
-import { useEffect, useRef, useState } from 'react'
-import { Box, Card, CardContent, CircularProgress, LinearProgress } from '@mui/material'
-import {
-  getConfiguredSyllabusData,
-  hydrateSyllabusConfigFromSupabase,
-  type SyllabusConfig,
-} from '../data/dashboardData'
-import { getUserSubjectProgress } from '../lib/userProgress'
-import { useAppStore } from '../store/useAppStore'
+import { useEffect, useState } from 'react'
+import { Box, Button, LinearProgress, MenuItem, TextField, ToggleButton, ToggleButtonGroup } from '@mui/material'
+import { Bookmark } from '@mui/icons-material'
+import { useNavigate } from 'react-router-dom'
+import { ADMIN_SYLLABUS_TARGETS, APPSC_GROUP_II_SOURCES, getCurrentGroup2Syllabus, GROUP_II_SCHEME_NOTICE } from '../data/group2Syllabus'
+import { hydrateSyllabusConfigFromSupabase, type SyllabusConfig } from '../data/dashboardData'
+import { getTopicProgress } from '../lib/studyPlanner'
+import { useStudyPlanStore } from '../store/useStudyPlanStore'
+import type { TopicStatus } from '../types/studyPlanner'
+
+const statusLabels: Record<TopicStatus, string> = {
+  'not-started': 'Not started',
+  'in-progress': 'In progress',
+  completed: 'Completed',
+  'needs-revision': 'Needs revision',
+}
 
 export function SubjectsPage() {
-  const { user } = useAppStore()
-  const [syllabusConfig, setSyllabusConfig] = useState<SyllabusConfig>(() => getConfiguredSyllabusData())
-  const [loadingRealApi, setLoadingRealApi] = useState(true)
-
-  const configuredPrelims = syllabusConfig.prelimsSubjects
-  const configuredMains = syllabusConfig.mainsSubjects
-  const allSubjects = [...configuredPrelims, ...configuredMains]
-  const liveProgress = getUserSubjectProgress(user?.id ?? 'demo-user', allSubjects)
-  const subjectGroups = [
-    { title: 'Prelims', items: configuredPrelims },
-    { title: 'Mains', items: configuredMains },
-  ]
-
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(allSubjects[0]?.id ?? null)
-  const [activeFilter, setActiveFilter] = useState<'All' | 'Prelims' | 'Mains'>('All')
-  const detailRef = useRef<HTMLDivElement | null>(null)
+  const navigate = useNavigate()
+  const plan = useStudyPlanStore((state) => state.plan)
+  const [selectedPaperId, setSelectedPaperId] = useState(getCurrentGroup2Syllabus()[0]?.id ?? '')
+  const [statusFilter, setStatusFilter] = useState<'all' | TopicStatus>('all')
+  const [search, setSearch] = useState('')
+  const [adminContent, setAdminContent] = useState<SyllabusConfig | null>(null)
+  const syllabus = getCurrentGroup2Syllabus()
+  const paper = syllabus.find((item) => item.id === selectedPaperId) ?? syllabus[0]
 
   useEffect(() => {
     let isMounted = true
-
-    const loadRealApiContent = async () => {
-      try {
-        setLoadingRealApi(true)
-        const realConfig = await hydrateSyllabusConfigFromSupabase()
-        if (isMounted && realConfig && (realConfig.prelimsSubjects.length > 0 || realConfig.mainsSubjects.length > 0)) {
-          setSyllabusConfig(realConfig)
-          setSelectedSubjectId((prev) => {
-            const exists = [...realConfig.prelimsSubjects, ...realConfig.mainsSubjects].some((s) => s.id === prev)
-            return exists ? prev : (realConfig.prelimsSubjects[0]?.id ?? null)
-          })
-        }
-      } catch (err) {
-        console.error('Failed to load real API app content:', err)
-      } finally {
-        if (isMounted) {
-          setLoadingRealApi(false)
-        }
+    void hydrateSyllabusConfigFromSupabase().then((config) => {
+      if (isMounted && window.localStorage.getItem('appsc_syllabus_config')) {
+        setAdminContent(config)
       }
-    }
-
-    void loadRealApiContent()
-
-    return () => {
-      isMounted = false
-    }
+    })
+    return () => { isMounted = false }
   }, [])
 
-  const visibleGroups = subjectGroups.filter((group) => activeFilter === 'All' || group.title === activeFilter)
-  const visibleSubjects = visibleGroups.flatMap((group) => group.items)
-  const selectedSubject = allSubjects.find((subject) => subject.id === selectedSubjectId) || visibleSubjects[0] || null
+  if (!paper || !plan) return null
 
-  useEffect(() => {
-    if (visibleSubjects.length === 0) return
-
-    if (!selectedSubjectId || !visibleSubjects.some((subject) => subject.id === selectedSubjectId)) {
-      setSelectedSubjectId(visibleSubjects[0].id)
-    }
-  }, [selectedSubjectId, visibleSubjects])
-
-  useEffect(() => {
-    if (detailRef.current) {
-      detailRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
-  }, [selectedSubjectId, activeFilter])
+  const topics = paper.subjects.flatMap((subject) => subject.units.flatMap((unit) => unit.topics))
+  const visibleTopicIds = new Set(topics.filter((topic) => {
+    const matchesSearch = !search || `${topic.title} ${topic.subtopics.join(' ')} ${topic.learningObjectives.join(' ')}`.toLowerCase().includes(search.toLowerCase())
+    const status = getTopicProgress(plan, topic.id)?.status ?? 'not-started'
+    return matchesSearch && (statusFilter === 'all' || status === statusFilter)
+  }).map((topic) => topic.id))
+  const completedCount = topics.filter((topic) => getTopicProgress(plan, topic.id)?.status === 'completed').length
+  const progressPercent = topics.length ? Math.round((completedCount / topics.length) * 100) : 0
+  const adminSubjects = adminContent ? [...adminContent.prelimsSubjects, ...adminContent.mainsSubjects] : []
+  const unmappedAdminSubjects = adminSubjects.filter((adminSubject) => !ADMIN_SYLLABUS_TARGETS[adminSubject.id])
 
   return (
-    <Box className="page-shell">
-      <Card className="panel-card exam-pattern-card">
-        <CardContent>
-          <div className="exam-pattern-header">
-            <h2>APPSC Group II Exam Pattern</h2>
-          </div>
-
-          <div className="exam-pattern-grid">
-            <div className="pattern-pill">
-              <span>Prelims</span>
-              <strong>4 sections</strong>
-            </div>
-            <div className="pattern-pill">
-              <span>Mains</span>
-              <strong>2 papers</strong>
-            </div>
-            <div className="pattern-pill">
-              <span>Weightage</span>
-              <strong>150 + 150 marks</strong>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="subject-filter-row">
-        {(['All', 'Prelims', 'Mains'] as const).map((filter) => (
-          <button
-            key={filter}
-            type="button"
-            className={activeFilter === filter ? 'subject-filter active' : 'subject-filter'}
-            onClick={() => setActiveFilter(filter)}
-          >
-            {filter}
-          </button>
-        ))}
-      </div>
-
-      <div className="subject-group-grid">
-        {visibleGroups.map((group) => (
-          <Card key={group.title} className="panel-card compact-card subject-group-card">
-            <CardContent>
-              <div className="subject-group-header">
-                <h2>{group.title}</h2>
-                <span>{group.items.length} subjects</span>
-              </div>
-
-              <div className="subject-list subject-card-list">
-                {group.items.map((subject) => {
-                  const progress = liveProgress.find((item) => item.subjectId === subject.id)?.percent ?? subject.percent
-
-                  return (
-                    <button
-                      key={subject.id}
-                      type="button"
-                      className={selectedSubjectId === subject.id ? 'subject-card active' : 'subject-card'}
-                      onClick={() => setSelectedSubjectId(subject.id)}
-                    >
-                      <div className="subject-card-top">
-                        <span className="subject-tag">{subject.marks}</span>
-                        <strong>{progress}%</strong>
-                      </div>
-                      <h3>{subject.name}</h3>
-                      <p>{subject.summary}</p>
-                      <div className="subject-progress-wrap">
-                        <LinearProgress variant="determinate" value={progress} className="subject-progress-bar" />
-                      </div>
-                      <div className="subject-progress-row">
-                        <span>Readiness</span>
-                        <strong>{progress}%</strong>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {selectedSubject && (
-        <div ref={detailRef}>
-          <Card className="panel-card subject-detail-panel">
-            <CardContent>
-              <div className="subject-detail-header">
-                <div>
-                  <span className="subject-detail-badge">Study focus</span>
-                  <h2>{selectedSubject.name}</h2>
-                </div>
-                <span className="subject-detail-mark">{selectedSubject.marks}</span>
-              </div>
-
-              <p className="subject-detail-summary">{selectedSubject.summary}</p>
-
-              {loadingRealApi ? (
-                <div className="subject-topics-loading">
-                  <CircularProgress size={22} sx={{ color: '#2563eb' }} />
-                  <span>Loading real study focus topic cards from API...</span>
-                </div>
-              ) : selectedSubject.topics && selectedSubject.topics.length > 0 ? (
-                <div className="subject-topic-list">
-                  {selectedSubject.topics.map((topic, index) => (
-                    <div key={`${selectedSubject.id}-topic-${index}`} className="subject-topic-item">
-                      <span className="topic-dot" />
-                      <div className="topic-card-content">{topic}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="subject-topics-empty">
-                  No study focus topics found in real API content for this subject.
-                </div>
-              )}
-            </CardContent>
-          </Card>
+    <Box className="page-shell syllabus-page">
+      <div className="syllabus-page-heading">
+        <div>
+          <span className="subject-detail-badge">APPSC GROUP II</span>
+          <h1>Syllabus map</h1>
+          <p>Track each topic against the current linked syllabus and your preparation notes.</p>
         </div>
+        <div className="syllabus-progress-summary">
+          <strong>{progressPercent}%</strong>
+          <span>{completedCount} / {topics.length} topics complete in this paper</span>
+        </div>
+      </div>
+
+      <div className="syllabus-sources">
+        <p>{GROUP_II_SCHEME_NOTICE}</p>
+        {APPSC_GROUP_II_SOURCES.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label}</a>)}
+        <p>Paper, subject, and screening-section order follows Notification 37/2026. Ordered Admin syllabus entries below are the topics used for progress tracking.</p>
+      </div>
+
+      <div className="syllabus-toolbar">
+        <ToggleButtonGroup value={paper.id} exclusive aria-label="Syllabus paper" onChange={(_event, value: string | null) => { if (value) setSelectedPaperId(value) }}>
+          {syllabus.map((item) => <ToggleButton key={item.id} value={item.id}>{item.title}</ToggleButton>)}
+        </ToggleButtonGroup>
+        <TextField label="Find a topic" value={search} onChange={(event) => setSearch(event.target.value)} size="small" />
+        <TextField select label="Status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | TopicStatus)} size="small">
+          <MenuItem value="all">All statuses</MenuItem>
+          <MenuItem value="not-started">Not started</MenuItem>
+          <MenuItem value="in-progress">In progress</MenuItem>
+          <MenuItem value="needs-revision">Needs revision</MenuItem>
+          <MenuItem value="completed">Completed</MenuItem>
+        </TextField>
+      </div>
+
+      <div className="syllabus-paper-heading">
+        <div>
+          <span className={paper.source === 'official-heading' ? 'syllabus-source-tag official' : 'syllabus-source-tag suggested'}>
+            {paper.source === 'official-heading' ? 'APPSC heading' : 'Suggested structure'}
+          </span>
+          <h2>{paper.title}</h2>
+        </div>
+        <span>
+          {paper.scheme.questionCount} questions / {paper.scheme.durationMinutes} min / {paper.scheme.maximumMarks} marks / {paper.scheme.negativeMarking.numerator}/{paper.scheme.negativeMarking.denominator} penalty per wrong answer / {topics.length} study topics
+        </span>
+      </div>
+
+      <div className="syllabus-subject-list">
+        {paper.subjects.map((subject) => (
+          <section className="syllabus-subject" key={subject.id}>
+            <div className="syllabus-subject-heading">
+              <div>
+                <span className={subject.source === 'official-heading' ? 'syllabus-source-tag official' : 'syllabus-source-tag suggested'}>
+                  {subject.source === 'official-heading' ? 'Subject heading' : 'Suggested grouping'}
+                </span>
+                <h3>{subject.title}</h3>
+              </div>
+              <span>{subject.marks ? `${subject.marks} marks / ` : ''}{subject.units.reduce((sum, unit) => sum + unit.topics.length, 0)} topics</span>
+            </div>
+            {subject.units.map((unit) => {
+              const unitTopics = unit.topics.filter((topic) => visibleTopicIds.has(topic.id))
+              if (!unitTopics.length) return null
+              const topicRows = unitTopics.map((topic) => {
+                const progress = getTopicProgress(plan, topic.id)
+                return (
+                  <article className="syllabus-topic-row" key={topic.id}>
+                    <div className="syllabus-topic-copy">
+                      <div className="syllabus-topic-title-row">
+                        <h5>{topic.title}</h5>
+                        <span className={topic.source === 'admin-reference' ? 'syllabus-source-tag admin-reference' : topic.source === 'official-heading' ? 'syllabus-source-tag official' : 'syllabus-source-tag suggested'}>
+                          {topic.source === 'admin-reference' ? 'Admin syllabus entry' : topic.source === 'official-heading' ? 'Official' : 'Suggested detail'}
+                        </span>
+                      </div>
+                      {topic.learningObjectives[0] && <p>{topic.learningObjectives[0]}</p>}
+                      {topic.subtopics.length > 0 && (
+                        <div className="syllabus-subtopic-list" aria-label="Suggested subtopics">
+                          {topic.subtopics.map((subtopic) => <span key={subtopic}>{subtopic}</span>)}
+                        </div>
+                      )}
+                      <div className="syllabus-topic-meta">
+                        <span>{topic.estimatedMinutes} min</span>
+                        <span>{topic.difficulty}</span>
+                        <span>{topic.priority} priority</span>
+                        {progress?.bookmarked && <Bookmark fontSize="small" aria-label="Bookmarked" />}
+                      </div>
+                    </div>
+                    <div className="syllabus-topic-progress">
+                      <span>{statusLabels[progress?.status ?? 'not-started']}</span>
+                      <strong>{progress?.completionPercent ?? 0}%</strong>
+                      <LinearProgress variant="determinate" value={progress?.completionPercent ?? 0} />
+                    </div>
+                    <Button size="small" onClick={() => navigate(`/study-plan?topic=${encodeURIComponent(topic.id)}`)}>Study</Button>
+                  </article>
+                )
+              })
+              return (
+                <div className="syllabus-unit" key={unit.id}>
+                  <div className="syllabus-unit-heading">
+                    <h4>{unit.title}</h4>
+                    <span className={unit.source === 'admin-reference' ? 'syllabus-source-tag admin-reference' : unit.source === 'official-heading' ? 'syllabus-source-tag official' : 'syllabus-source-tag suggested'}>
+                      {unit.source === 'admin-reference' ? 'Admin topic order' : unit.source === 'official-heading' ? 'APPSC section' : 'Suggested organization'}
+                    </span>
+                  </div>
+                  <div className="syllabus-topic-list">{topicRows}</div>
+                </div>
+              )
+            })}
+          </section>
+        ))}
+        {!visibleTopicIds.size && <div className="planner-empty-state"><strong>No topics match these filters.</strong><span>Change the search or status filter.</span></div>}
+      </div>
+
+      {unmappedAdminSubjects.length > 0 && (
+        <section className="admin-syllabus-supplement">
+          <div className="syllabus-paper-heading">
+            <div>
+              <span className="syllabus-source-tag suggested">Mapping required</span>
+              <h2>Unmapped Admin content</h2>
+            </div>
+            <span>Not assigned to a verified paper or section</span>
+          </div>
+          {unmappedAdminSubjects.map((subject) => (
+            <details key={subject.id} className="admin-syllabus-item">
+              <summary>{subject.name}<span>{subject.topics.length} references</span></summary>
+              <p>{subject.summary}</p>
+              <ul>{subject.topics.map((topic) => <li key={topic}>{topic}</li>)}</ul>
+            </details>
+          ))}
+        </section>
       )}
     </Box>
   )

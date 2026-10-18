@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Box, Button, Card, CardContent, Typography } from '@mui/material'
+import { Box, Button, Card, CardContent, CircularProgress, Typography } from '@mui/material'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AppSidebar, getNavItems } from './components/AppSidebar'
 import { AuthShell } from './components/AuthShell'
@@ -18,6 +18,7 @@ import {
 } from './pages'
 import './App.css'
 import { useAppStore } from './store/useAppStore'
+import { useStudyPlanStore } from './store/useStudyPlanStore'
 
 function NotFoundState() {
   const navigate = useNavigate()
@@ -49,7 +50,9 @@ function NotFoundState() {
 }
 
 function App() {
-  const { user, authMode, loading, error, setAuthMode, login, register, logout, hydrateSession } = useAppStore()
+  const { user, authMode, loading, sessionHydrated, error, setAuthMode, login, register, logout, hydrateSession } = useAppStore()
+  const loadStudyPlan = useStudyPlanStore((state) => state.loadForUser)
+  const resetStudyPlan = useStudyPlanStore((state) => state.reset)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -62,20 +65,25 @@ function App() {
   }, [hydrateSession])
 
   useEffect(() => {
+    if (!sessionHydrated) return
+    if (user) {
+      void loadStudyPlan(user.id)
+    } else {
+      resetStudyPlan()
+    }
+  }, [loadStudyPlan, resetStudyPlan, sessionHydrated, user])
+
+  useEffect(() => {
+    if (!sessionHydrated) return
+
     if (!user) {
-      if (location.pathname === '/') {
-        navigate('/login', { replace: true })
-      }
-      if (location.pathname !== '/login' && location.pathname !== '/register' && location.pathname !== '/') {
-        navigate('/login', { replace: true })
-      }
       return
     }
 
     if (location.pathname === '/login' || location.pathname === '/register' || location.pathname === '/') {
       navigate('/dashboard', { replace: true })
     }
-  }, [location.pathname, navigate, user])
+  }, [location.pathname, navigate, sessionHydrated, user])
 
   const handleAuthModeChange = (nextMode: 'login' | 'register') => {
     setAuthMode(nextMode)
@@ -86,6 +94,9 @@ function App() {
     try {
       if (authMode === 'register') {
         await register({ name, email, password })
+        setAuthMode('login')
+        setPassword('')
+        navigate('/login', { replace: true })
       } else {
         await login({ email, password })
       }
@@ -107,6 +118,14 @@ function App() {
     if (location.pathname === '/settings') return 'Settings'
     return 'Dashboard'
   })()
+
+  if (!sessionHydrated) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+        <CircularProgress aria-label="Restoring session" />
+      </Box>
+    )
+  }
 
   if (!user) {
     return (
@@ -148,7 +167,8 @@ function App() {
           }
         />
         <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="*" element={<NotFoundState />} />
+        <Route path="/dashboard" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     )
   }
@@ -170,6 +190,8 @@ function App() {
 
         <div className="page-content">
           <Routes>
+            <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/register" element={<Navigate to="/dashboard" replace />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/study-plan" element={<StudyPlanPage />} />

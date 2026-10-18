@@ -1,137 +1,303 @@
-import { Box, Button, Card, CardContent, Chip, LinearProgress } from '@mui/material'
-import { getConfiguredSyllabusData, todayTasks, weeklyHours } from '../data/dashboardData'
-import { getOverallSubjectProgress, getUserSubjectProgress } from '../lib/userProgress'
+import { Alert, Box, Button, Chip, LinearProgress } from '@mui/material'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { getAllSyllabusTopics, getCurrentGroup2Syllabus } from '../data/group2Syllabus'
+import { getTopicPracticeQuestions } from '../data/topicPracticeQuestions'
+import { getUserMockAttemptsFromApi } from '../lib/mockTestApi'
+import {
+  addDaysToDateKey,
+  getLocalDateKey,
+  getRevisionSessions,
+  getSessionsInPeriod,
+  getStudyRecommendation,
+  getTopicById,
+  getTopicProgress,
+} from '../lib/studyPlanner'
 import { useAppStore } from '../store/useAppStore'
+import { useStudyPlanStore } from '../store/useStudyPlanStore'
+import type { MockAttempt } from '../data/dashboardData'
+
+const formatMinutes = (minutes: number) => {
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  if (hours && remainder) return `${hours}h ${remainder}m`
+  if (hours) return `${hours}h`
+  return `${remainder}m`
+}
+
+const getTopicContext = (topicId: string) => {
+  for (const paper of getCurrentGroup2Syllabus()) {
+    for (const subject of paper.subjects) {
+      if (subject.units.some((unit) => unit.topics.some((topic) => topic.id === topicId))) {
+        return { paper, subject }
+      }
+    }
+  }
+  return null
+}
+
+const getStudyStreak = (completedDays: Set<string>, today: string) => {
+  let streak = 0
+  let checkDate = completedDays.has(today) ? today : addDaysToDateKey(today, -1)
+  while (completedDays.has(checkDate)) {
+    streak += 1
+    checkDate = addDaysToDateKey(checkDate, -1)
+  }
+  return streak
+}
 
 export function DashboardPage() {
-  const { user, dashboard, updateDashboard } = useAppStore()
-  const { prelimsSubjects, mainsSubjects } = getConfiguredSyllabusData()
-  const allSubjects = [...prelimsSubjects, ...mainsSubjects]
-  const liveProgress = getUserSubjectProgress(user?.id ?? 'demo-user', allSubjects)
-  const overallProgress = getOverallSubjectProgress(user?.id ?? 'demo-user', allSubjects)
+  const navigate = useNavigate()
+  const user = useAppStore((state) => state.user)
+  const plan = useStudyPlanStore((state) => state.plan)
+  const loading = useStudyPlanStore((state) => state.loading)
+  const error = useStudyPlanStore((state) => state.error)
+  const loadForUser = useStudyPlanStore((state) => state.loadForUser)
+  const [mockAttempts, setMockAttempts] = useState<MockAttempt[]>([])
+  const [mockAttemptsError, setMockAttemptsError] = useState<string | null>(null)
+  const today = getLocalDateKey()
 
-  const stats = [
-    { label: 'Overall progress', value: `${overallProgress}%`, detail: 'Target: 70%' },
-    { label: 'Study streak', value: `${dashboard.studyStreak} days`, detail: 'Best: 18 days' },
-    {
-      label: 'MCQ accuracy',
-      value: `${Math.round(liveProgress.reduce((sum, item) => sum + item.quizAccuracy, 0) / Math.max(liveProgress.length, 1))}%`,
-      detail: '+8% this week',
-    },
-    {
-      label: 'Avg. study hours',
-      value: `${(liveProgress.reduce((sum, item) => sum + item.studyMinutes, 0) / Math.max(liveProgress.length, 1) / 60).toFixed(1)}h`,
-      detail: 'Daily target: 4h',
-    },
-  ]
+  useEffect(() => {
+    if (!user?.id) return
+    let isCurrentUser = true
+    void getUserMockAttemptsFromApi(user.id).then((attempts) => {
+      if (isCurrentUser) setMockAttempts(attempts)
+    }).catch((loadError) => {
+      if (isCurrentUser) setMockAttemptsError(loadError instanceof Error ? loadError.message : 'Unable to load mock results.')
+    })
+    return () => { isCurrentUser = false }
+  }, [user?.id])
+
+  if (loading) {
+    return <Box className="page-shell"><div className="dashboard-loading">Preparing your study day...</div></Box>
+  }
+
+  if (!plan) {
+    return (
+      <Box className="page-shell">
+        <Alert severity="error">{error ?? 'Your study plan is not available yet.'}</Alert>
+        <Button variant="outlined" onClick={() => user?.id && void loadForUser(user.id)} disabled={!user?.id}>Retry loading dashboard</Button>
+      </Box>
+    )
+  }
+
+  const allTopics = getAllSyllabusTopics()
+  const topicCount = allTopics.length
+  const overallCompletion = topicCount
+    ? Math.round(allTopics.reduce((sum, topic) => sum + (getTopicProgress(plan, topic.id)?.completionPercent ?? 0), 0) / topicCount)
+    : 0
+  const todaySessions = getSessionsInPeriod(plan.sessions, 'today', today)
+  const weekSessions = getSessionsInPeriod(plan.sessions, 'week', today)
+  const todayPlannedMinutes = todaySessions.filter((session) => session.status !== 'skipped').reduce((sum, session) => sum + session.plannedMinutes, 0)
+  const todayActualSeconds = todaySessions.reduce((sum, session) => sum + (session.actualSeconds ?? 0), 0)
+  const weekCompleted = weekSessions.filter((session) => session.status === 'completed')
+  const weekActualSeconds = weekCompleted.reduce((sum, session) => sum + (session.actualSeconds ?? 0), 0)
+  const completedDays = new Set(plan.sessions.filter((session) => session.status === 'completed').map((session) => session.date))
+  const studyStreak = getStudyStreak(completedDays, today)
+  const recommendation = getStudyRecommendation(plan, today)
+  const pendingSession = recommendation?.session ?? null
+  const currentSessionTopic = plan.activeTimer ? getTopicById(plan.activeTimer.topicId) : null
+  const continueTopicId = currentSessionTopic?.id ?? pendingSession?.topicId ?? allTopics.find((topic) => {
+    return getTopicProgress(plan, topic.id)?.status !== 'completed'
+  })?.id
+  const dueRevisions = getRevisionSessions(plan, today).filter((session) => session.date <= today)
+  const upcomingRevisions = getRevisionSessions(plan, today).filter((session) => session.date > today).slice(0, 4)
+  const targetDate = plan.settings.targetDate
+  const remainingDays = targetDate
+    ? Math.max(0, Math.ceil((new Date(`${targetDate}T12:00:00`).getTime() - new Date(`${today}T12:00:00`).getTime()) / 86400000))
+    : null
+
+  const subjectProgress = getCurrentGroup2Syllabus().flatMap((paper) => paper.subjects.map((subject) => {
+    const topics = subject.units.flatMap((unit) => unit.topics)
+    const percent = topics.length
+      ? Math.round(topics.reduce((sum, topic) => sum + (getTopicProgress(plan, topic.id)?.completionPercent ?? 0), 0) / topics.length)
+      : 0
+    return { paper, subject, percent, completed: topics.filter((topic) => getTopicProgress(plan, topic.id)?.status === 'completed').length, total: topics.length }
+  }))
+
+  const topicAccuracy = new Map<string, { correct: number; total: number }>()
+  plan.quizAttempts.forEach((attempt) => {
+    const context = getTopicContext(attempt.topicId)
+    if (!context) return
+    const entry = topicAccuracy.get(context.subject.id) ?? { correct: 0, total: 0 }
+    entry.correct += attempt.correct ? 1 : 0
+    entry.total += 1
+    topicAccuracy.set(context.subject.id, entry)
+  })
+  const weakSubjects = Array.from(topicAccuracy.entries())
+    .map(([subjectId, result]) => ({
+      title: subjectProgress.find((item) => item.subject.id === subjectId)?.subject.title ?? subjectId,
+      accuracy: Math.round((result.correct / result.total) * 100),
+      attempts: result.total,
+    }))
+    .sort((first, second) => first.accuracy - second.accuracy)
+    .slice(0, 3)
+  const recentAnswers = plan.quizAttempts.slice().sort((first, second) => second.attemptedAt.localeCompare(first.attemptedAt)).slice(0, 4)
+  const availableTopicCount = plan.topicProgress.filter((progress) => progress.status !== 'completed').length
 
   return (
-    <Box className="page-shell">
-      <Box className="hero-panel">
-        <Box>
-          <Chip label="APPSC GROUP 2 PREPARATION" color="primary" variant="outlined" />
-          <h1 className="page-title">Welcome, {user?.name || 'Student'}</h1>
-        </Box>
+    <Box className="page-shell dashboard-study-shell">
+      <div className="dashboard-study-intro">
+        <div>
+          <span className="subject-detail-badge">APPSC GROUP II / STUDY DAY</span>
+          <h1>Welcome, {user?.name || 'Student'}</h1>
+          <p>{new Date(`${today}T12:00:00`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+          {recommendation && <p className="dashboard-recommendation-reason">Next step: {recommendation.reason}</p>}
+        </div>
+        <Button
+          variant="contained"
+          size="large"
+          onClick={() => continueTopicId && navigate(`/study-plan?topic=${encodeURIComponent(continueTopicId)}`)}
+          disabled={!continueTopicId}
+        >
+          {currentSessionTopic ? 'Continue current session' : 'Continue studying'}
+        </Button>
+      </div>
 
-        <Box className="countdown-box">
-          <span>Exam countdown</span>
-          <strong>{dashboard.examCountdown} days</strong>
-        </Box>
-      </Box>
+      {error && <Alert severity="error">{error}</Alert>}
+      {mockAttemptsError && <Alert severity="warning">Mock test results could not be refreshed: {mockAttemptsError}</Alert>}
 
-      <Box className="stats-grid">
-        {stats.map((item) => (
-          <Card key={item.label} className="stat-card">
-            <CardContent>
-              <div className="stat-label">{item.label}</div>
-              <div className="stat-value">{item.value}</div>
-              <div className="stat-detail">{item.detail}</div>
-            </CardContent>
-          </Card>
-        ))}
-      </Box>
+      <div className="dashboard-study-metrics">
+        <div className="dashboard-study-metric">
+          <span>Today's study time</span>
+          <strong>{formatMinutes(Math.floor(todayActualSeconds / 60))} <small>/ {formatMinutes(plan.settings.dailyHours * 60)}</small></strong>
+          <LinearProgress variant="determinate" value={Math.min(100, (todayActualSeconds / 60 / (plan.settings.dailyHours * 60)) * 100)} />
+        </div>
+        <div className="dashboard-study-metric">
+          <span>Overall syllabus</span>
+          <strong>{overallCompletion}%</strong>
+          <LinearProgress variant="determinate" value={overallCompletion} />
+        </div>
+        <div className="dashboard-study-metric">
+          <span>Topics remaining</span>
+          <strong>{availableTopicCount} <small>of {topicCount}</small></strong>
+          <span className="dashboard-metric-footnote">{plan.topicProgress.filter((topic) => topic.status === 'completed').length} completed</span>
+        </div>
+        <div className="dashboard-study-metric">
+          <span>Study streak</span>
+          <strong>{studyStreak} <small>days</small></strong>
+          <span className="dashboard-metric-footnote">{weekCompleted.length} sessions / {new Set(weekCompleted.map((session) => session.date)).size} days this week</span>
+        </div>
+        <div className="dashboard-study-metric">
+          <span>Revisions overdue</span>
+          <strong>{dueRevisions.filter((session) => session.overdue).length}</strong>
+          <Button size="small" onClick={() => navigate('/revision')}>Open revision center</Button>
+        </div>
+        <div className="dashboard-study-metric">
+          <span>Target date</span>
+          <strong>{remainingDays === null ? 'Not set' : `${remainingDays} days`}</strong>
+          <Button size="small" onClick={() => navigate('/study-plan')}>{targetDate ? 'Adjust target' : 'Set a target'}</Button>
+        </div>
+      </div>
 
-      <Box className="content-grid">
-        <Card className="panel-card">
-          <CardContent>
-            <h2>Today’s target</h2>
-            <div className="task-list">
-              {todayTasks.map((task) => (
-                <div key={task.title} className="task-item">
-                  <div>
-                    <strong>{task.title}</strong>
-                    <p>{task.subtitle}</p>
-                  </div>
-                  <span>{task.duration}</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="panel-card">
-          <CardContent>
-            <h2>Today’s progress</h2>
-            <div className="progress-block">
-              <LinearProgress variant="determinate" value={72} className="progress-bar" />
-              <div className="progress-meta">
-                <strong>2h 52m / 4h</strong>
-                <span>72% completed</span>
-              </div>
-            </div>
-            <Button
-              variant="contained"
-              sx={{ mt: 2 }}
-              onClick={() =>
-                updateDashboard({
-                  ...dashboard,
-                  overallProgress: Math.min(100, dashboard.overallProgress + 3),
-                  status: 'ready',
-                })
-              }
-            >
-              Update progress
-            </Button>
-          </CardContent>
-        </Card>
-      </Box>
-
-      <Box className="content-grid">
-        <Card className="panel-card">
-          <CardContent>
-            <h2>Subject progress</h2>
-            <div className="subject-list">
-              {allSubjects.map((subject) => {
-                const progress = liveProgress.find((item) => item.subjectId === subject.id)?.percent ?? subject.percent
-
+      <div className="dashboard-study-main-grid">
+        <section className="dashboard-study-section" aria-labelledby="dashboard-today-heading">
+          <div className="dashboard-section-heading">
+            <div><span className="subject-detail-badge">{formatMinutes(todayPlannedMinutes)} planned</span><h2 id="dashboard-today-heading">Today's study plan</h2></div>
+            <Button size="small" onClick={() => navigate('/study-plan')}>Open plan</Button>
+          </div>
+          {todaySessions.length ? (
+            <div className="dashboard-session-list">
+              {todaySessions.slice(0, 6).map((session) => {
+                const topic = getTopicById(session.topicId)
+                const context = getTopicContext(session.topicId)
+                if (!topic) return null
                 return (
-                  <div key={subject.name} className="subject-row">
-                    <div className="subject-name-row">
-                      <span>{subject.name}</span>
-                      <strong>{progress}%</strong>
-                    </div>
-                    <LinearProgress variant="determinate" value={progress} />
-                  </div>
+                  <button
+                    key={session.id}
+                    type="button"
+                    className="dashboard-session-row"
+                    onClick={() => navigate(`/study-plan?topic=${encodeURIComponent(topic.id)}`)}
+                  >
+                    <span className="dashboard-session-time">{session.plannedMinutes} min</span>
+                    <span className="dashboard-session-title"><strong>{topic.title}</strong><small>{context?.subject.title}</small></span>
+                    <Chip size="small" label={session.status.replace('-', ' ')} />
+                  </button>
                 )
               })}
             </div>
-          </CardContent>
-        </Card>
+          ) : (
+            <p className="dashboard-empty-copy">No sessions scheduled for today. Choose a topic in your study plan to get started.</p>
+          )}
+          <div className="dashboard-actual-summary">
+            <span>Completed study time</span>
+            <strong>{formatMinutes(Math.floor(todayActualSeconds / 60))} / {formatMinutes(plan.settings.dailyHours * 60)}</strong>
+          </div>
+        </section>
 
-        <Card className="panel-card">
-          <CardContent>
-            <h2>Weekly performance</h2>
-            <div className="bar-chart">
-              {weeklyHours.map((hour) => (
-                <div key={hour.day} className="bar-column">
-                  <div className="bar" style={{ height: `${(hour.value / 5.5) * 100}%` }} />
-                  <span>{hour.day}</span>
-                </div>
-              ))}
+        <section className="dashboard-study-section" aria-labelledby="dashboard-subjects-heading">
+          <div className="dashboard-section-heading">
+            <div><span className="subject-detail-badge">{subjectProgress.length} subjects</span><h2 id="dashboard-subjects-heading">Subject progress</h2></div>
+            <Button size="small" onClick={() => navigate('/subjects')}>Syllabus</Button>
+          </div>
+          <div className="dashboard-subject-progress-list">
+            {subjectProgress.slice(0, 6).map(({ paper, subject, percent, completed, total }) => (
+              <div key={`${paper.id}-${subject.id}`} className="dashboard-subject-progress-row">
+                <div><span>{subject.title}</span><strong>{percent}%</strong></div>
+                <LinearProgress variant="determinate" value={percent} />
+                <small>{completed} / {total} topics complete</small>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="dashboard-study-lower-grid">
+        <section className="dashboard-study-section" aria-labelledby="dashboard-revision-heading">
+          <div className="dashboard-section-heading">
+            <div><span className="subject-detail-badge">Spaced reviews</span><h2 id="dashboard-revision-heading">Revision queue</h2></div>
+            <Button size="small" onClick={() => navigate('/revision')}>View all</Button>
+          </div>
+          {dueRevisions.length || upcomingRevisions.length ? (
+            <div className="dashboard-compact-list">
+              {[...dueRevisions, ...upcomingRevisions].slice(0, 5).map((session) => {
+                const topic = getTopicById(session.topicId)
+                if (!topic) return null
+                const label = session.overdue ? `Overdue since ${session.date}` : session.date === today ? 'Due today' : `Due ${session.date}`
+                return <button key={session.id} type="button" onClick={() => navigate(`/study-plan?topic=${encodeURIComponent(topic.id)}`)}><strong>{topic.title}</strong><span>{label}</span></button>
+              })}
             </div>
-          </CardContent>
-        </Card>
-      </Box>
+          ) : (
+            <p className="dashboard-empty-copy">No reviews due. Marking a topic complete starts its 1, 3, 7, 14, and 30-day cycle.</p>
+          )}
+        </section>
+
+        <section className="dashboard-study-section" aria-labelledby="dashboard-performance-heading">
+          <div className="dashboard-section-heading">
+            <div><span className="subject-detail-badge">Saved practice checks</span><h2 id="dashboard-performance-heading">Recent results</h2></div>
+            <Button size="small" onClick={() => navigate('/practice')}>Practice</Button>
+          </div>
+          {recentAnswers.length || mockAttempts.length ? (
+            <div className="dashboard-compact-list">
+              {mockAttempts.slice(0, 3).map((attempt) => (
+                <button key={attempt.id} type="button" onClick={() => navigate('/mock-tests')}>
+                  <strong>{attempt.testTitle}</strong>
+                  <span>Mock test: {attempt.score}/{attempt.total} ({attempt.accuracy ?? 0}%) / {attempt.subjectName}</span>
+                </button>
+              ))}
+              {recentAnswers.map((attempt) => {
+                const topic = getTopicById(attempt.topicId)
+                const question = getTopicPracticeQuestions(attempt.topicId).find((item) => item.id === attempt.questionId)
+                if (!topic || !question) return null
+                return <button key={attempt.id} type="button" onClick={() => navigate(`/study-plan?topic=${encodeURIComponent(topic.id)}`)}><strong>{topic.title}</strong><span>{attempt.correct ? 'Correct' : `Review: ${question.options[question.correctIndex]}`}</span></button>
+              })}
+            </div>
+          ) : (
+            <p className="dashboard-empty-copy">Your practice results will appear here after a topic quick check.</p>
+          )}
+          {weakSubjects.length > 0 && (
+            <div className="dashboard-weak-subjects">
+              <h3>Focus areas from your answers</h3>
+              {weakSubjects.map((subject) => <span key={subject.title}>{subject.title}: {subject.accuracy}% ({subject.attempts} checks)</span>)}
+            </div>
+          )}
+        </section>
+      </div>
+
+      <div className="dashboard-study-footer">
+        <span>This week's recorded study: {formatMinutes(Math.floor(weekActualSeconds / 60))}</span>
+        <Button size="small" onClick={() => navigate('/mock-tests')}>Available mock tests</Button>
+      </div>
     </Box>
   )
 }

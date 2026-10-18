@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Box, Button, Card, CardContent, LinearProgress } from '@mui/material'
+import { Alert, Box, Button, Card, CardContent, LinearProgress } from '@mui/material'
 import {
   getMockTestsFromApi,
   submitMockTestToApi,
@@ -126,6 +126,9 @@ export function MockTestsPage() {
 
   return (
     <Box className="page-shell">
+      <Alert severity="info">
+        Notification 37/2026 specifies 150 questions in 150 minutes for Screening and for each Mains paper, with a one-third penalty per wrong answer. These shorter in-app practice sets score correct answers only and do not apply negative marking; they are not previous-year questions.
+      </Alert>
       {!isStarted && (
         <Card className="panel-card mock-test-list-card">
           <CardContent>

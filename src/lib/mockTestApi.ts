@@ -1,7 +1,10 @@
 import {
   defaultMockTests,
+  getStoredUserMockAttempts,
   getStoredMockTests,
   saveStoredMockTests,
+  saveStoredUserMockAttempts,
+  type MockAttempt,
   type MockPaperType,
   type MockQuestion,
   type MockTest,
@@ -172,6 +175,48 @@ export const getMockTestsFromApi = async (): Promise<MockTest[]> => {
 
   const stored = getStoredMockTests()
   return stored.length ? stored : defaultMockTests
+}
+
+export const getUserMockAttemptsFromApi = async (userId: string): Promise<MockAttempt[]> => {
+  if (!userId) return []
+  const cached = getStoredUserMockAttempts(userId)
+  if (!supabase || userId.startsWith('demo-')) return cached
+
+  const { data, error } = await supabase
+    .from('mock_attempts')
+    .select('*')
+    .eq('user_id', userId)
+    .order('submitted_at', { ascending: false })
+    .limit(30)
+
+  if (error) throw error
+
+  const tests = await getMockTestsFromApi()
+  const testsById = new Map(tests.map((test) => [test.id, test]))
+  const remote = (data ?? []).map((row): MockAttempt => {
+    const test = testsById.get(String(row.test_id))
+    return {
+      id: String(row.id),
+      testId: String(row.test_id),
+      testTitle: test?.title ?? 'Mock test',
+      score: Number(row.score ?? 0),
+      total: Number(row.total ?? 0),
+      correct: Number(row.correct ?? 0),
+      wrong: Number(row.wrong ?? 0),
+      skipped: Number(row.skipped ?? 0),
+      accuracy: Number(row.accuracy ?? 0),
+      paperType: test?.paperType ?? 'Prelims',
+      subjectName: test?.subjectName ?? 'General',
+      submittedAt: String(row.submitted_at ?? new Date().toISOString()),
+    }
+  })
+
+  const remoteKeys = new Set(remote.map((attempt) => `${attempt.testId}:${Date.parse(attempt.submittedAt)}`))
+  const merged = [...remote, ...cached.filter((attempt) => !remoteKeys.has(`${attempt.testId}:${Date.parse(attempt.submittedAt)}`))]
+    .sort((first, second) => second.submittedAt.localeCompare(first.submittedAt))
+    .slice(0, 30)
+  saveStoredUserMockAttempts(userId, merged)
+  return merged
 }
 
 export const getStoredMockDrafts = (): MockTest[] => {

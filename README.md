@@ -16,13 +16,14 @@ This application helps APPSC aspirants:
 
 - User authentication with login and registration
 - Role-based access for normal users and admins
-- Fixed learning dashboard with progress and countdown insights
-- APPSC subject cards mapped to prelims and mains syllabus
-- Study plan tracking and revision workflow
+- Per-user study dashboard with daily plan, actual study time, topic progress, and review queue
+- APPSC Group-II syllabus map organized by paper, subject, unit, topic, and suggested subtopics
+- Personalized study schedules with preparation level, medium, daily hours, and optional target date
+- Focus timer, topic notes/bookmarks, confidence ratings, curated practice checks, and spaced revisions
 - Practice/test assessment pages with timers and scoring
 - Notes management with subject and paper-type filtering
 - Analytics for accuracy, weak areas, and recent mock attempts
-- Supabase-ready data model with local fallback for demo mode
+- Supabase persistence with owner-only row-level security and user-scoped demo fallback
 
 ## Tech stack
 
@@ -48,9 +49,12 @@ This application helps APPSC aspirants:
 2. Configure environment variables:
    - VITE_SUPABASE_URL
    - VITE_SUPABASE_ANON_KEY
-3. Start the app:
+3. Apply the database SQL in the Supabase SQL editor:
+   - New Supabase project: run `supabase/schema.sql` once.
+   - Existing project: run `supabase/migrations/20261018_study_plans.sql`.
+4. Start the app:
    npm run dev
-4. Production build:
+5. Production build:
    npm run build
 
 ## Environment variables
@@ -63,6 +67,26 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 ## Admin access
 
 The app supports admin access to configure syllabus content and publish mock tests. Admin-only tabs are visible when the authenticated role is admin.
+
+## Planner persistence
+
+With Supabase configured, each authenticated user has one `public.study_plans` JSONB record. Row-level security restricts reads and writes to `auth.uid() = user_id`. The planner stores settings, scheduled and historical sessions, topic progress, timer checkpoints, quiz attempts, and revision dates together so schedule changes do not erase completed history.
+
+Without Supabase configuration, the app uses per-demo-user localStorage for development only. That data is limited to the current browser and is not a cloud backup. The UI labels this mode explicitly.
+
+## Syllabus and practice sources
+
+The APPSC portal links the Group-II syllabus published on 27 April 2023 and Notification No. 37/2026, dated 13 October 2026. The 37/2026 notification's scheme specifies a 150-question, 150-minute, 150-mark Screening Test and two Mains papers, each 150 questions, 150 minutes, and 150 marks. It prescribes a one-third mark penalty for each wrong answer. The syllabus map source-labels the official paper, subject, and screening-section headings; topic-level organization and subtopics are suggested study detail. Recheck APPSC's portal for later corrigenda or notifications.
+
+The topic quick-check bank contains original planner practice questions only. It is not a previous-year question bank and does not label generated questions as official APPSC questions. Existing in-app mock tests are short practice sets that score correct answers only; they are not full-pattern exam simulations and do not apply official negative marking. Topics without a curated quick check still support study sessions, notes, status, confidence, and revisions.
+
+## Study workflow
+
+- The planner distributes syllabus topics across the available daily study hours and retains old sessions when preferences change.
+- Overdue sessions are redistributed into available daily capacity; their original scheduled records remain visible in the long-term view.
+- Finishing a topic schedules revisions at 1, 3, 7, 14, and 30 days. Repeated wrong answers or low confidence shorten later intervals; strong recent recall can extend them.
+- A running timer checkpoints every 10 seconds. After an interruption, time after the last checkpoint is excluded; actual study time is added to totals only when the user finishes the session.
+- Applying the migration is required for Supabase-backed plans. Demo-mode plans do not require a database.
 
 ## SEO and discoverability
 

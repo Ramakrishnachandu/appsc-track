@@ -22,10 +22,16 @@ import {
   saveSyllabusData,
   saveStoredMockTests,
 } from '../data/dashboardData'
+import { setAdminSyllabusConfig } from '../data/group2Syllabus'
+import { useAppStore } from '../store/useAppStore'
+import { useStudyPlanStore } from '../store/useStudyPlanStore'
 
 export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mock' }) {
   const location = useLocation()
   const navigate = useNavigate()
+  const user = useAppStore((state) => state.user)
+  const loadStudyPlan = useStudyPlanStore((state) => state.loadForUser)
+  const resetStudyPlan = useStudyPlanStore((state) => state.reset)
 
   const resolvedSection: 'content' | 'mock' =
     initialSection ?? (location.pathname.includes('/mock') ? 'mock' : 'content')
@@ -367,7 +373,12 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
   }
 
   const handleSave = async () => {
-    await saveSyllabusData(config)
+    const savedConfig = await saveSyllabusData(config)
+    setAdminSyllabusConfig(savedConfig)
+    if (user?.id) {
+      resetStudyPlan()
+      await loadStudyPlan(user.id)
+    }
     setStatusMessage('Syllabus data saved and applied across the app.')
   }
 
@@ -375,6 +386,11 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
     const freshConfig = await resetSyllabusData()
     setConfig(freshConfig)
     setSelectedSubjectId(freshConfig.prelimsSubjects[0].id)
+    setAdminSyllabusConfig(freshConfig)
+    if (user?.id) {
+      resetStudyPlan()
+      await loadStudyPlan(user.id)
+    }
     setStatusMessage('Default syllabus data restored.')
   }
 

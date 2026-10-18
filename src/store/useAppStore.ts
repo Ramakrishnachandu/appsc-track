@@ -22,6 +22,7 @@ type AppState = {
   authMode: AuthMode
   dashboard: DashboardState
   loading: boolean
+  sessionHydrated: boolean
   error: string | null
   setAuthMode: (mode: AuthMode) => void
   hydrateSession: () => Promise<void>
@@ -59,54 +60,61 @@ export const useAppStore = create<AppState>((set, get) => ({
   authMode: 'login',
   dashboard: defaultDashboard,
   loading: false,
+  sessionHydrated: false,
   error: null,
   setAuthMode: (mode) => set({ authMode: mode, error: null }),
 
   hydrateSession: async () => {
-    if (!supabase) {
-      const stored = localStorage.getItem('appsc_active_user')
-      if (!stored) {
+    try {
+      if (!supabase) {
+        const stored = localStorage.getItem('appsc_active_user')
+        if (!stored) {
+          set({ user: null, dashboard: defaultDashboard })
+          return
+        }
+
+        try {
+          const signedInUser = JSON.parse(stored) as Partial<AppUser>
+          const normalisedUser: AppUser = {
+            id: signedInUser.id || 'demo-user',
+            name: signedInUser.name || 'Student',
+            email: signedInUser.email || 'student@appsc.com',
+            role: resolveUserRole(signedInUser.role),
+          }
+          set({ user: normalisedUser, dashboard: getUserDashboard(normalisedUser) })
+        } catch {
+          set({ user: null, dashboard: defaultDashboard })
+        }
+        return
+      }
+
+      const { data, error } = await supabase.auth.getSession()
+      if (error || !data.session?.user) {
         set({ user: null, dashboard: defaultDashboard })
         return
       }
 
-      try {
-        const signedInUser = JSON.parse(stored) as Partial<AppUser>
-        const normalisedUser: AppUser = {
-          id: signedInUser.id || 'demo-user',
-          name: signedInUser.name || 'Student',
-          email: signedInUser.email || 'student@appsc.com',
-          role: resolveUserRole(signedInUser.role),
-        }
-        set({ user: normalisedUser, dashboard: getUserDashboard(normalisedUser) })
-      } catch {
-        set({ user: null, dashboard: defaultDashboard })
-      }
-      return
-    }
+      const userId = data.session.user.id
+      const profileRole = await getProfileRole(userId)
+      const resolvedRole = resolveUserRole(
+        profileRole === 'admin' ? 'admin' : (data.session.user.user_metadata?.role || data.session.user.app_metadata?.role),
+      )
 
-    const { data, error } = await supabase.auth.getSession()
-    if (error || !data.session?.user) {
+      const activeUser = toUser(
+        data.session.user.user_metadata?.full_name || data.session.user.email?.split('@')[0] || 'Student',
+        data.session.user.email || '',
+        userId,
+        resolvedRole === 'admin' ? 'admin' : profileRole,
+      )
+
+      localStorage.setItem('appsc_active_user', JSON.stringify(activeUser))
+      set({ user: activeUser, dashboard: getUserDashboard(activeUser) })
+      void hydrateSyllabusConfigFromSupabase()
+    } catch {
       set({ user: null, dashboard: defaultDashboard })
-      return
+    } finally {
+      set({ sessionHydrated: true })
     }
-
-    const userId = data.session.user.id
-    const profileRole = await getProfileRole(userId)
-    const resolvedRole = resolveUserRole(
-      profileRole === 'admin' ? 'admin' : (data.session.user.user_metadata?.role || data.session.user.app_metadata?.role),
-    )
-
-    const activeUser = toUser(
-      data.session.user.user_metadata?.full_name || data.session.user.email?.split('@')[0] || 'Student',
-      data.session.user.email || '',
-      userId,
-      resolvedRole === 'admin' ? 'admin' : profileRole,
-    )
-
-    localStorage.setItem('appsc_active_user', JSON.stringify(activeUser))
-    set({ user: activeUser, dashboard: getUserDashboard(activeUser) })
-    void hydrateSyllabusConfigFromSupabase()
   },
 
   login: async ({ email, password }) => {
@@ -163,10 +171,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         users.push(newUser)
         setDemoUsers(users)
 
-        const user = toUser(name, email, newUser.id, 'user')
-        const dashboard = getUserDashboard(user)
-        localStorage.setItem('appsc_active_user', JSON.stringify(user))
-        set({ user, dashboard, loading: false, error: null })
+        localStorage.removeItem('appsc_active_user')
+        set({ user: null, dashboard: defaultDashboard, loading: false, error: null })
         return
       }
 
@@ -183,16 +189,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (error) throw error
 
-      const profileRole = data.user?.id ? await getProfileRole(data.user.id) : 'user'
-      const user = toUser(
-        name || data.user?.email?.split('@')[0] || 'Student',
-        data.user?.email || email,
-        data.user?.id || crypto.randomUUID(),
-        profileRole,
-      )
+      if (data.session) {
+        const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' })
+        if (signOutError) throw signOutError
+      }
 
-      localStorage.setItem('appsc_active_user', JSON.stringify(user))
-      set({ user, loading: false, error: null, dashboard: defaultDashboard })
+      localStorage.removeItem('appsc_active_user')
+      set({ user: null, loading: false, error: null, dashboard: defaultDashboard })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Registration failed.'
       set({ loading: false, error: message })

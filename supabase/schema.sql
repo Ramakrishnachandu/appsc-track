@@ -89,6 +89,13 @@ create table if not exists public.revision_queue (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.study_plans (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  state jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.mock_tests (
   id uuid primary key default uuid_generate_v4(),
   title text not null,
@@ -121,6 +128,7 @@ alter table public.topic_progress enable row level security;
 alter table public.quiz_attempts enable row level security;
 alter table public.notes enable row level security;
 alter table public.revision_queue enable row level security;
+alter table public.study_plans enable row level security;
 alter table public.mock_tests enable row level security;
 alter table public.mock_attempts enable row level security;
 
@@ -154,6 +162,10 @@ create policy "Notes can be managed by owner only" on public.notes
 create policy "Revision queue is viewable by owner only" on public.revision_queue
   for select using (auth.uid() = user_id);
 create policy "Revision queue can be managed by owner only" on public.revision_queue
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "Study plans are manageable by owner only" on public.study_plans;
+create policy "Study plans are manageable by owner only" on public.study_plans
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create policy "Mock tests are readable by authenticated users" on public.mock_tests
