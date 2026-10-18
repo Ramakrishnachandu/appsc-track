@@ -322,32 +322,31 @@ export const hydrateSyllabusConfigFromSupabase = async (): Promise<SyllabusConfi
 export const saveSyllabusData = async (data: SyllabusConfig) => {
   const normalized = normalizeSyllabusConfig(data)
 
+  if (!supabase) {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(SYLLABUS_STORAGE_KEY, JSON.stringify(normalized))
+    }
+    return normalized
+  }
+
+  const { error } = await supabase.from('app_content').upsert(
+    {
+      key: 'syllabus_config',
+      content: normalized,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'key' },
+  )
+
+  if (error) {
+    throw error
+  }
+
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(SYLLABUS_STORAGE_KEY, JSON.stringify(normalized))
   }
 
-  if (!supabase) {
-    return normalized
-  }
-
-  try {
-    const { error } = await supabase.from('app_content').upsert(
-      {
-        key: 'syllabus_config',
-        content: normalized,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'key' },
-    )
-
-    if (error) {
-      throw error
-    }
-
-    return normalized
-  } catch {
-    return normalized
-  }
+  return normalized
 }
 
 export const resetSyllabusData = async () => {

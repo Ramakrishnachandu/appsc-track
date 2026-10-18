@@ -10,6 +10,7 @@ import {
 import {
   buildMockQuestionSet,
   deleteMockTestFromApi,
+  getMockTestsFromApi,
   getMockTestValidationError,
   getStoredMockDrafts,
   publishMockTestToApi,
@@ -56,10 +57,39 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
     }
   }, [])
   const [selectedSubjectId, setSelectedSubjectId] = useState(defaultConfig.prelimsSubjects[0]?.id || '')
-  const [statusMessage, setStatusMessage] = useState('')
+  const [status, setStatus] = useState<{ message: string; severity: 'success' | 'error' | 'info' } | null>(null)
   const [mockTests, setMockTests] = useState<MockTest[]>(() => getStoredMockTests())
   const [draftTests, setDraftTests] = useState<MockTest[]>(() => getStoredMockDrafts())
   const [editingTestId, setEditingTestId] = useState<string | null>(null)
+  const [mockTestsError, setMockTestsError] = useState('')
+  const [mockTestsReload, setMockTestsReload] = useState(0)
+  const [savingSyllabus, setSavingSyllabus] = useState(false)
+
+  const announce = (message: string, severity: 'success' | 'error' | 'info' = 'success') => {
+    setStatus({ message, severity })
+  }
+
+  useEffect(() => {
+    if (adminSection !== 'mock') return
+
+    let isMounted = true
+    void getMockTestsFromApi()
+      .then((tests) => {
+        if (isMounted) {
+          setMockTests(tests)
+          setMockTestsError('')
+        }
+      })
+      .catch((error: unknown) => {
+        if (isMounted) {
+          setMockTestsError(error instanceof Error ? error.message : 'Unable to load published tests.')
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [adminSection, mockTestsReload])
 
   type DraftQuestion = {
     prompt: string
@@ -177,9 +207,9 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
       })
       setCustomQuestions(importedQuestions)
       setDraftTest((current) => ({ ...current, count: importedQuestions.length }))
-      setStatusMessage(`${importedQuestions.length} questions imported. Review citations and answer keys before publishing.`)
+      announce(`${importedQuestions.length} questions imported. Review citations and answer keys before publishing.`, 'info')
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Unable to import questions. Check the JSON format.')
+      announce(error instanceof Error ? error.message : 'Unable to import questions. Check the JSON format.', 'error')
     }
   }
 
@@ -230,17 +260,17 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
       const nextTest = createMockTestFromDraft()
       const validationError = getMockTestValidationError(nextTest)
       if (validationError) {
-        setStatusMessage(validationError)
+        announce(validationError, 'error')
         return
       }
       const published = editingTestId ? await updateMockTestToApi(nextTest) : await publishMockTestToApi(nextTest)
       const nextTests = [published, ...mockTests.filter((item) => item.id !== published.id)]
       setMockTests(nextTests)
       saveStoredMockTests(nextTests)
-      setStatusMessage(`${draftTest.paperType} mock test ${editingTestId ? 'updated' : 'published'} successfully.`)
+      announce(`${draftTest.paperType} mock test ${editingTestId ? 'updated' : 'published'} successfully.`)
       resetMockDraftForm()
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Unable to publish this assessment.')
+      announce(error instanceof Error ? error.message : 'Unable to publish this assessment.', 'error')
     }
   }
 
@@ -250,10 +280,10 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
       const nextDrafts = [nextTest, ...draftTests.filter((item) => item.id !== nextTest.id)]
       setDraftTests(nextDrafts)
       saveStoredMockDrafts(nextDrafts)
-      setStatusMessage(`Draft saved for ${nextTest.title}.`)
+      announce(`Draft saved for ${nextTest.title}.`)
       setEditingTestId(nextTest.id)
-    } catch {
-      setStatusMessage('Unable to save the draft. Select a subject first.')
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'Unable to save the draft.', 'error')
     }
   }
 
@@ -278,7 +308,7 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
       sourcePublishedAt: question.sourcePublishedAt,
     })))
     setQuestionImport('')
-    setStatusMessage(`Draft loaded: ${test.title}`)
+    announce(`Draft loaded: ${test.title}`, 'info')
   }
 
   const handleEditMockTest = (test: MockTest) => {
@@ -302,7 +332,20 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
       sourcePublishedAt: question.sourcePublishedAt,
     })))
     navigate('/admin/mock-tests')
-    setStatusMessage(`Editing ${test.title}. Update changes and publish when ready.`)
+    announce(`Editing ${test.title}. Update changes and publish when ready.`, 'info')
+  }
+
+  const handleDeleteMockDraft = (testId: string) => {
+    const confirmed = window.confirm('Delete this saved draft? This action cannot be undone.')
+    if (!confirmed) return
+
+    const nextDrafts = draftTests.filter((item) => item.id !== testId)
+    setDraftTests(nextDrafts)
+    saveStoredMockDrafts(nextDrafts)
+    if (editingTestId === testId) {
+      resetMockDraftForm()
+    }
+    announce('Saved draft deleted.')
   }
 
   const handleDeleteMockTest = async (testId: string) => {
@@ -316,9 +359,9 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
       if (editingTestId === testId) {
         resetMockDraftForm()
       }
-      setStatusMessage('Mock test deleted successfully.')
-    } catch {
-      setStatusMessage('Unable to delete this mock test right now.')
+      announce('Mock test deleted successfully.')
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'Unable to delete this mock test right now.', 'error')
     }
   }
 
@@ -408,25 +451,41 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
   }
 
   const handleSave = async () => {
-    const savedConfig = await saveSyllabusData(config)
-    setAdminSyllabusConfig(savedConfig)
-    if (user?.id) {
-      resetStudyPlan()
-      await loadStudyPlan(user.id)
+    setSavingSyllabus(true)
+    try {
+      const savedConfig = await saveSyllabusData(config)
+      setAdminSyllabusConfig(savedConfig)
+      if (user?.id) {
+        resetStudyPlan()
+        await loadStudyPlan(user.id)
+      }
+      announce('Syllabus data saved and applied across the app.')
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'Unable to save syllabus data.', 'error')
+    } finally {
+      setSavingSyllabus(false)
     }
-    setStatusMessage('Syllabus data saved and applied across the app.')
   }
 
   const handleReset = async () => {
-    const freshConfig = await resetSyllabusData()
-    setConfig(freshConfig)
-    setSelectedSubjectId(freshConfig.prelimsSubjects[0].id)
-    setAdminSyllabusConfig(freshConfig)
-    if (user?.id) {
-      resetStudyPlan()
-      await loadStudyPlan(user.id)
+    if (!window.confirm('Restore the default syllabus content? Unsaved edits will be lost.')) return
+
+    setSavingSyllabus(true)
+    try {
+      const freshConfig = await resetSyllabusData()
+      setConfig(freshConfig)
+      setSelectedSubjectId(freshConfig.prelimsSubjects[0].id)
+      setAdminSyllabusConfig(freshConfig)
+      if (user?.id) {
+        resetStudyPlan()
+        await loadStudyPlan(user.id)
+      }
+      announce('Default syllabus data restored.')
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'Unable to restore default syllabus data.', 'error')
+    } finally {
+      setSavingSyllabus(false)
     }
-    setStatusMessage('Default syllabus data restored.')
   }
 
   return (
@@ -460,14 +519,16 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
               <div className="admin-actions">
                 {adminSection === 'content' && (
                   <>
-                    <Button variant="contained" onClick={handleSave}>Save changes</Button>
-                    <Button variant="outlined" onClick={handleReset}>Reset</Button>
+                    <Button variant="contained" onClick={() => void handleSave()} disabled={savingSyllabus}>
+                      {savingSyllabus ? 'Saving…' : 'Save changes'}
+                    </Button>
+                    <Button variant="outlined" onClick={() => void handleReset()} disabled={savingSyllabus}>Reset</Button>
                   </>
                 )}
               </div>
             </div>
 
-            {statusMessage && <div className="admin-status">{statusMessage}</div>}
+            {status && <Alert severity={status.severity} sx={{ mb: 2 }}>{status.message}</Alert>}
 
             {adminSection === 'content' ? (
               <div className="admin-layout">
@@ -955,7 +1016,7 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
                       </div>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <Button size="small" variant="text" onClick={() => loadMockDraft(test)}>Load</Button>
-                        <Button size="small" color="warning" variant="text" onClick={() => handleDeleteMockTest(test.id)}>Delete</Button>
+                        <Button size="small" color="warning" variant="text" onClick={() => handleDeleteMockDraft(test.id)}>Delete</Button>
                       </div>
                     </div>
                   )) : <p>No draft tests saved yet.</p>}
@@ -966,8 +1027,17 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
                     <h3 style={{ margin: 0 }}>Published tests</h3>
                   </div>
                 </div>
+                {mockTestsError && (
+                  <Alert
+                    severity="error"
+                    action={<Button color="inherit" size="small" onClick={() => setMockTestsReload((count) => count + 1)}>Retry</Button>}
+                    sx={{ mb: 2 }}
+                  >
+                    Published tests could not be loaded: {mockTestsError}
+                  </Alert>
+                )}
                 <div className="subject-list">
-                  {mockTests.map((test) => (
+                  {mockTests.length ? mockTests.map((test) => (
                     <div key={test.id} className="task-item">
                       <div>
                         <strong>{test.title}</strong>
@@ -979,7 +1049,7 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
                         <Button size="small" color="warning" variant="text" onClick={() => handleDeleteMockTest(test.id)}>Delete</Button>
                       </div>
                     </div>
-                  ))}
+                  )) : !mockTestsError && <p>No published tests yet. Save a question set and publish it for candidates.</p>}
                 </div>
               </Box>
             )}
