@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Box, Button, LinearProgress, MenuItem, TextField, ToggleButton, ToggleButtonGroup } from '@mui/material'
+import { Alert, Box, Button, CircularProgress, LinearProgress, MenuItem, TextField, ToggleButton, ToggleButtonGroup } from '@mui/material'
 import { Bookmark } from '@mui/icons-material'
 import { useNavigate } from 'react-router-dom'
 import { ADMIN_SYLLABUS_TARGETS, APPSC_GROUP_II_SOURCES, getCurrentGroup2Syllabus, GROUP_II_SCHEME_NOTICE } from '../data/group2Syllabus'
@@ -18,6 +18,10 @@ const statusLabels: Record<TopicStatus, string> = {
 export function SubjectsPage() {
   const navigate = useNavigate()
   const plan = useStudyPlanStore((state) => state.plan)
+  const loading = useStudyPlanStore((state) => state.loading)
+  const error = useStudyPlanStore((state) => state.error)
+  const loadForUser = useStudyPlanStore((state) => state.loadForUser)
+  const userId = useStudyPlanStore((state) => state.userId)
   const [selectedPaperId, setSelectedPaperId] = useState(getCurrentGroup2Syllabus()[0]?.id ?? '')
   const [statusFilter, setStatusFilter] = useState<'all' | TopicStatus>('all')
   const [search, setSearch] = useState('')
@@ -35,7 +39,24 @@ export function SubjectsPage() {
     return () => { isMounted = false }
   }, [])
 
-  if (!paper || !plan) return null
+  if (loading) {
+    return <Box className="page-shell planner-loading"><CircularProgress aria-label="Loading syllabus progress" /></Box>
+  }
+
+  if (!plan) {
+    return (
+      <Box className="page-shell">
+        <Alert severity="error">{error ?? 'Your syllabus progress is not available yet.'}</Alert>
+        <Button variant="outlined" onClick={() => userId && void loadForUser(userId)} disabled={!userId}>
+          Retry loading syllabus
+        </Button>
+      </Box>
+    )
+  }
+
+  if (!paper) {
+    return <Box className="page-shell"><Alert severity="error">The syllabus is currently unavailable.</Alert></Box>
+  }
 
   const topics = paper.subjects.flatMap((subject) => subject.units.flatMap((unit) => unit.topics))
   const visibleTopicIds = new Set(topics.filter((topic) => {
@@ -69,17 +90,19 @@ export function SubjectsPage() {
       </div>
 
       <div className="syllabus-toolbar">
-        <ToggleButtonGroup value={paper.id} exclusive aria-label="Syllabus paper" onChange={(_event, value: string | null) => { if (value) setSelectedPaperId(value) }}>
+        <ToggleButtonGroup className="syllabus-paper-selector" value={paper.id} exclusive aria-label="Syllabus paper" onChange={(_event, value: string | null) => { if (value) setSelectedPaperId(value) }}>
           {syllabus.map((item) => <ToggleButton key={item.id} value={item.id}>{item.title}</ToggleButton>)}
         </ToggleButtonGroup>
-        <TextField label="Find a topic" value={search} onChange={(event) => setSearch(event.target.value)} size="small" />
-        <TextField select label="Status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | TopicStatus)} size="small">
-          <MenuItem value="all">All statuses</MenuItem>
-          <MenuItem value="not-started">Not started</MenuItem>
-          <MenuItem value="in-progress">In progress</MenuItem>
-          <MenuItem value="needs-revision">Needs revision</MenuItem>
-          <MenuItem value="completed">Completed</MenuItem>
-        </TextField>
+        <div className="syllabus-filters">
+          <TextField label="Find a topic" value={search} onChange={(event) => setSearch(event.target.value)} size="small" />
+          <TextField select label="Status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | TopicStatus)} size="small">
+            <MenuItem value="all">All statuses</MenuItem>
+            <MenuItem value="not-started">Not started</MenuItem>
+            <MenuItem value="in-progress">In progress</MenuItem>
+            <MenuItem value="needs-revision">Needs revision</MenuItem>
+            <MenuItem value="completed">Completed</MenuItem>
+          </TextField>
+        </div>
       </div>
 
       <div className="syllabus-paper-heading">

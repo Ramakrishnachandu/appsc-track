@@ -16,6 +16,8 @@ This application helps APPSC aspirants:
 
 - User authentication with login and registration
 - Role-based access for normal users and admins
+- First-login guided tour of the preparation workflow, replayable from the app header
+- Collapsible desktop navigation and an overlay navigation drawer on mobile
 - Per-user study dashboard with daily plan, actual study time, topic progress, and review queue
 - APPSC Group-II syllabus map organized by paper, subject, unit, topic, and suggested subtopics
 - Personalized study schedules with preparation level, medium, daily hours, and optional target date
@@ -89,6 +91,10 @@ Current-affairs notes are candidate-maintained records. Each entry stores its so
 - Finishing a topic schedules revisions at 1, 3, 7, 14, and 30 days. Repeated wrong answers or low confidence shorten later intervals; strong recent recall can extend them.
 - A running timer checkpoints every 10 seconds. After an interruption, time after the last checkpoint is excluded; actual study time is added to totals only when the user finishes the session.
 - Both existing-project migrations are required for Supabase-backed preparation features. Demo-mode plans and notes do not require a database.
+
+## Guided tour
+
+The first authenticated visit in a browser opens a short tour of the dashboard, study plan, syllabus, practice and mock tests, notes and revision, and analytics. Users can skip it, open a related feature, or replay it at any time using **App tour** in the page header. Completion is stored in browser localStorage, scoped to the signed-in user; it is not synchronized across browsers or devices and does not require a Supabase migration.
 
 ## SEO and discoverability
 

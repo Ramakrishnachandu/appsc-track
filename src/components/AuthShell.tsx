@@ -41,7 +41,7 @@ export function AuthShell({
           </div>
 
           <Typography variant="overline" className="auth-kicker">APPSC TRACK</Typography>
-          <h2 className="visual-title">Your preparation dashboard for APPSC success.</h2>
+          <h2 className="visual-title">Your preparation dashboard for APPSC Groups II success.</h2>
           <p className="visual-subtitle">
             Study plans, syllabus mapping, mock test practice, revision notes, and exam analytics in one place.
           </p>
@@ -67,7 +67,13 @@ export function AuthShell({
                 : 'Create your account and start tracking your preparation journey.'}
             </p>
 
-            <div className="auth-form">
+            <form
+              className="auth-form"
+              onSubmit={(event) => {
+                event.preventDefault()
+                onSubmit()
+              }}
+            >
               {authMode === 'register' && (
                 <TextField
                   label="Full name"
@@ -75,6 +81,8 @@ export function AuthShell({
                   onChange={(event) => onNameChange(event.target.value)}
                   fullWidth
                   margin="normal"
+                  required
+                  autoComplete="name"
                 />
               )}
 
@@ -85,6 +93,8 @@ export function AuthShell({
                 onChange={(event) => onEmailChange(event.target.value)}
                 fullWidth
                 margin="normal"
+                required
+                autoComplete="email"
               />
 
               <TextField
@@ -94,11 +104,17 @@ export function AuthShell({
                 onChange={(event) => onPasswordChange(event.target.value)}
                 fullWidth
                 margin="normal"
+                required
                 slotProps={{
+                  htmlInput: {
+                    minLength: authMode === 'register' ? 6 : undefined,
+                    autoComplete: authMode === 'register' ? 'new-password' : 'current-password',
+                  },
                   input: {
                     endAdornment: (
                       <InputAdornment position="end">
                         <IconButton
+                          type="button"
                           aria-label="toggle password visibility"
                           edge="end"
                           onClick={() => setShowPassword((value) => !value)}
@@ -118,11 +134,12 @@ export function AuthShell({
                 </Typography>
               )}
 
-              <Button variant="contained" fullWidth onClick={onSubmit} disabled={loading} sx={{ mt: 1 }}>
+              <Button type="submit" variant="contained" fullWidth disabled={loading} sx={{ mt: 1 }}>
                 {loading ? 'Please wait...' : authMode === 'register' ? 'Create account' : 'Login'}
               </Button>
 
               <Button
+                type="button"
                 variant="text"
                 className="switch-auth-btn"
                 onClick={() => {
@@ -132,7 +149,7 @@ export function AuthShell({
               >
                 {authMode === 'login' ? 'Need an account? Register' : 'Already have an account? Login'}
               </Button>
-            </div>
+            </form>
           </CardContent>
         </Card>
       </div>

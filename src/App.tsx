@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Box, Button, Card, CardContent, CircularProgress, Typography } from '@mui/material'
+import { Box, Button, Card, CardContent, CircularProgress, Typography, useMediaQuery } from '@mui/material'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AppSidebar, getNavItems } from './components/AppSidebar'
+import { AppTour } from './components/AppTour'
 import { AuthShell } from './components/AuthShell'
 import { PageHeader } from './components/PageHeader'
 import {
@@ -57,6 +58,9 @@ function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [tourOpen, setTourOpen] = useState(false)
+  const isMobile = useMediaQuery('(max-width: 980px)')
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -74,6 +78,29 @@ function App() {
   }, [loadStudyPlan, resetStudyPlan, sessionHydrated, user])
 
   useEffect(() => {
+    if (!isMobile || !mobileNavOpen) return
+
+    const previousOverflow = document.body.style.overflow
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false)
+    }
+
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [isMobile, mobileNavOpen])
+
+  useEffect(() => {
+    const breakpoint = window.matchMedia('(max-width: 980px)')
+    const closeDrawerOnResize = () => setMobileNavOpen(false)
+    breakpoint.addEventListener('change', closeDrawerOnResize)
+    return () => breakpoint.removeEventListener('change', closeDrawerOnResize)
+  }, [])
+
+  useEffect(() => {
     if (!sessionHydrated) return
 
     if (!user) {
@@ -88,6 +115,25 @@ function App() {
   const handleAuthModeChange = (nextMode: 'login' | 'register') => {
     setAuthMode(nextMode)
     navigate(nextMode === 'login' ? '/login' : '/register', { replace: false })
+  }
+
+  const completeTour = () => {
+    if (user) {
+      window.localStorage.setItem(`appsc_tour_completed:${user.id}`, 'true')
+    }
+    setTourOpen(false)
+  }
+
+  const visitTourFeature = (path: string) => {
+    completeTour()
+    setMobileNavOpen(false)
+    navigate(path)
+  }
+
+  const handleLogout = () => {
+    setTourOpen(false)
+    setMobileNavOpen(false)
+    void logout()
   }
 
   const handleSubmit = async () => {
@@ -174,19 +220,30 @@ function App() {
   }
 
   const visibleNavItems = getNavItems(user.role)
+  const shouldShowTour = sessionHydrated
+    && (tourOpen || window.localStorage.getItem(`appsc_tour_completed:${user.id}`) !== 'true')
 
   return (
-    <Box className={sidebarCollapsed ? 'app-layout sidebar-collapsed' : 'app-layout'}>
+    <Box className={!isMobile && sidebarCollapsed ? 'app-layout sidebar-collapsed' : 'app-layout'}>
       <AppSidebar
         user={user}
-        sidebarCollapsed={sidebarCollapsed}
+        sidebarCollapsed={!isMobile && sidebarCollapsed}
+        isMobile={isMobile}
+        mobileOpen={mobileNavOpen}
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
+        onCloseMobile={() => setMobileNavOpen(false)}
         visibleNavItems={visibleNavItems}
-        onLogout={() => void logout()}
+        onLogout={handleLogout}
       />
 
       <main className="main-panel">
-        <PageHeader title={pageTitle} userName={user.name || user.email || 'Student'} onLogout={() => void logout()} />
+        <PageHeader
+          title={pageTitle}
+          userName={user.name || user.email || 'Student'}
+          onLogout={handleLogout}
+          onOpenTour={() => setTourOpen(true)}
+          onOpenMobileNav={() => setMobileNavOpen(true)}
+        />
 
         <div className="page-content">
           <Routes>
@@ -214,6 +271,7 @@ function App() {
           </Routes>
         </div>
       </main>
+      <AppTour open={shouldShowTour} onClose={completeTour} onVisit={visitTourFeature} />
     </Box>
   )
 }
