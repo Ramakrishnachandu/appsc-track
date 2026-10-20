@@ -507,6 +507,9 @@ export function AdminPage({ initialSection }: { initialSection?: 'content' | 'mo
           >
             Mock test manager
           </NavLink>
+          <NavLink to="/admin/operations" className={() => location.pathname.startsWith('/admin/') && !location.pathname.includes('/mock') && !location.pathname.includes('/content') ? 'admin-subnav-item active' : 'admin-subnav-item'}>
+            More admin tools
+          </NavLink>
         </aside>
 
         <Card className="panel-card admin-panel-card">

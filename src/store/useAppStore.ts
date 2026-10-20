@@ -96,15 +96,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const userId = data.session.user.id
       const profileRole = await getProfileRole(userId)
-      const resolvedRole = resolveUserRole(
-        profileRole === 'admin' ? 'admin' : (data.session.user.user_metadata?.role || data.session.user.app_metadata?.role),
-      )
+      const resolvedRole = resolveUserRole(profileRole)
 
       const activeUser = toUser(
         data.session.user.user_metadata?.full_name || data.session.user.email?.split('@')[0] || 'Student',
         data.session.user.email || '',
         userId,
-        resolvedRole === 'admin' ? 'admin' : profileRole,
+        resolvedRole,
       )
 
       localStorage.setItem('appsc_active_user', JSON.stringify(activeUser))

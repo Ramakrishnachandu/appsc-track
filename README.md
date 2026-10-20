@@ -24,8 +24,12 @@ This application helps APPSC aspirants:
 - Focus timer, topic notes/bookmarks, confidence ratings, curated practice checks, and spaced revisions
 - Practice/test assessment pages with timers and scoring
 - Notes management with subject and paper-type filtering
+- Candidate-facing source-attributed APPSC notices and curated resources
+- Candidate help requests with private status tracking and admin responses
 - Analytics for accuracy, weak areas, and recent mock attempts
 - Supabase persistence with owner-only row-level security and user-scoped demo fallback
+- Admin-managed practice questions, notices, and resources with draft/review/publish/archive states and revision history
+- Privacy-preserving aggregate admin metrics and a support inbox
 
 ## Tech stack
 
@@ -53,7 +57,7 @@ This application helps APPSC aspirants:
    - VITE_SUPABASE_ANON_KEY
 3. Apply the database SQL in the Supabase SQL editor:
    - New Supabase project: run `supabase/schema.sql` once.
-   - Existing project: run `supabase/migrations/20261018_study_plans.sql`, then `supabase/migrations/20261019_preparation_workflow.sql`.
+   - Existing project: run `supabase/migrations/20261018_study_plans.sql`, `supabase/migrations/20261019_preparation_workflow.sql`, then `supabase/migrations/20261020_admin_content_management.sql`.
 4. Start the app:
    npm run dev
 5. Production build:
@@ -68,7 +72,9 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 
 ## Admin access
 
-The app supports admin access to configure syllabus content and publish mock tests. Admin-only tabs are visible when the authenticated role is admin.
+The app supports admin access to configure syllabus content, publish mock tests, manage a question bank, publish notices and curated resources, review content revisions, and handle candidate support requests. Question, notice, and resource entries use a draft → review → publish/archive workflow; candidates see only the active published version. Editing published content creates a replacement draft, leaving the current version visible until the replacement is approved. Revision history records each save. These entries require a source title and HTTPS source URL, but administrators remain responsible for verifying accuracy and rights to use the material. Existing syllabus and mock-test controls retain their current save/publish behavior.
+
+The admin operations overview uses aggregate counts only. It does not expose candidate notes, study plans, or individual practice histories. Account-role and credential changes are intentionally not available in the client admin panel; those require a trusted server-side administrative workflow. Candidate support requests are visible only to their owner and admins. In local/demo mode, admin content and support requests are stored in the current browser and are not shared between accounts or devices.
 
 ## Planner persistence
 

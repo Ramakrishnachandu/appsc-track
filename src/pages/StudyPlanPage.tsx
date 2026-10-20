@@ -23,7 +23,7 @@ import {
 import { Bookmark, BookmarkBorder, CheckCircleOutlined, Pause, PlayArrow, Stop } from '@mui/icons-material'
 import { useLocation } from 'react-router-dom'
 import { APPSC_GROUP_II_SOURCES, getCurrentGroup2Syllabus, GROUP_II_SCHEME_NOTICE, getAllSyllabusTopics } from '../data/group2Syllabus'
-import { getTopicPracticeQuestions } from '../data/topicPracticeQuestions'
+import { getTopicPracticeQuestions, refreshPublishedAdminPracticeQuestions } from '../data/topicPracticeQuestions'
 import {
   addDaysToDateKey,
   addPlanSession,
@@ -220,6 +220,8 @@ function StudyTopicPanel({ topic, plan, onUpdate, onComplete }: {
   onUpdate: (changes: Parameters<typeof updateTopicProgress>[2]) => void
   onComplete: () => void
 }) {
+  const [questionLoadError, setQuestionLoadError] = useState('')
+  const [, setQuestionsLoaded] = useState(false)
   const progress = getTopicProgress(plan, topic.id)
   const location = getTopicContext(topic.id)
   const questions = getTopicPracticeQuestions(topic.id)
@@ -230,6 +232,21 @@ function StudyTopicPanel({ topic, plan, onUpdate, onComplete }: {
   const accuracy = topicAttempts.length
     ? Math.round((topicAttempts.filter((attempt) => attempt.correct).length / topicAttempts.length) * 100)
     : null
+
+  useEffect(() => {
+    let active = true
+    void refreshPublishedAdminPracticeQuestions()
+      .then(() => {
+        if (active) {
+          setQuestionLoadError('')
+          setQuestionsLoaded((loaded) => !loaded)
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) setQuestionLoadError(error instanceof Error ? error.message : 'Unable to load published practice questions.')
+      })
+    return () => { active = false }
+  }, [])
 
   if (!progress) return null
 
@@ -358,6 +375,7 @@ function StudyTopicPanel({ topic, plan, onUpdate, onComplete }: {
           </div>
           <span>{topicAttempts.length} answers saved</span>
         </div>
+        {questionLoadError && <Alert severity="error">Published practice questions could not be loaded: {questionLoadError}</Alert>}
         {questions.length ? questions.map((question) => {
           const isChecked = Boolean(checkedQuestions[question.id])
           const selectedIndex = answers[question.id]
@@ -365,6 +383,7 @@ function StudyTopicPanel({ topic, plan, onUpdate, onComplete }: {
           return (
             <div key={question.id} className="topic-question">
               <p>{question.prompt}</p>
+              {question.sourceTitle && question.sourceUrl && <small>Source: <a href={question.sourceUrl} target="_blank" rel="noreferrer">{question.sourceTitle}</a></small>}
               <RadioGroup
                 aria-label={question.prompt}
                 value={selectedIndex ?? ''}

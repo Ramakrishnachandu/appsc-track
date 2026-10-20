@@ -1,4 +1,4 @@
-import { AdminPanelSettingsOutlined, AutoStoriesOutlined, BarChartOutlined, CalendarMonthOutlined, ChevronLeftOutlined, ChevronRightOutlined, CloseOutlined, DashboardOutlined, ExitToAppOutlined, NoteAltOutlined, QuizOutlined, SchoolOutlined, SettingsOutlined, TimelineOutlined } from '@mui/icons-material'
+import { AdminPanelSettingsOutlined, AutoStoriesOutlined, BarChartOutlined, CalendarMonthOutlined, ChevronLeftOutlined, ChevronRightOutlined, CloseOutlined, DashboardOutlined, ExitToAppOutlined, HelpOutlineOutlined, LibraryBooksOutlined, NoteAltOutlined, QuizOutlined, SchoolOutlined, SettingsOutlined, TimelineOutlined } from '@mui/icons-material'
 import { Button } from '@mui/material'
 import { NavLink } from 'react-router-dom'
 
@@ -32,6 +32,8 @@ const navItemConfig: NavItem[] = [
   { label: 'Revision', path: '/revision', icon: <AutoStoriesOutlined fontSize="small" /> },
   { label: 'Analytics', path: '/analytics', icon: <BarChartOutlined fontSize="small" /> },
   { label: 'Notes', path: '/notes', icon: <NoteAltOutlined fontSize="small" /> },
+  { label: 'Notices & Resources', path: '/resources', icon: <LibraryBooksOutlined fontSize="small" /> },
+  { label: 'Help & Support', path: '/support', icon: <HelpOutlineOutlined fontSize="small" /> },
   { label: 'Settings', path: '/settings', icon: <SettingsOutlined fontSize="small" /> },
   { label: 'Admin', path: '/admin/content', icon: <AdminPanelSettingsOutlined fontSize="small" /> },
 ]

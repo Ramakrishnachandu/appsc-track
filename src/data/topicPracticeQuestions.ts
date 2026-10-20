@@ -1,3 +1,5 @@
+import { getAdminContent } from '../lib/adminContentApi'
+
 export type TopicPracticeQuestion = {
   id: string
   topicId: string
@@ -5,6 +7,66 @@ export type TopicPracticeQuestion = {
   options: string[]
   correctIndex: number
   explanation: string
+  sourceTitle?: string
+  sourceUrl?: string
+}
+
+let publishedAdminQuestions: TopicPracticeQuestion[] = []
+let publishedQuestionsLoaded = false
+let publishedQuestionLoad: Promise<TopicPracticeQuestion[]> | null = null
+
+const isHttpsSource = (value: string) => {
+  try {
+    return new URL(value).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+export async function refreshPublishedAdminPracticeQuestions() {
+  if (publishedQuestionsLoaded) return publishedAdminQuestions
+  if (publishedQuestionLoad) return publishedQuestionLoad
+  publishedQuestionLoad = getAdminContent({ kind: 'question', includeUnpublished: false })
+    .then((items) => {
+      publishedAdminQuestions = items.map((item) => {
+        const { topicId, prompt, options, correctIndex, explanation } = item.content
+        const validOptions = Array.isArray(options)
+          ? options.filter((option): option is string => typeof option === 'string')
+          : []
+        if (
+          typeof topicId !== 'string'
+          || typeof prompt !== 'string'
+          || !Array.isArray(options)
+          || validOptions.length !== 4
+          || validOptions.length !== options.length
+          || typeof correctIndex !== 'number'
+          || !Number.isInteger(correctIndex)
+          || correctIndex < 0
+          || correctIndex > 3
+          || typeof explanation !== 'string'
+          || !item.sourceTitle
+          || !isHttpsSource(item.sourceUrl)
+        ) {
+          throw new Error(`Published question "${item.title}" has invalid question data or source attribution.`)
+        }
+        return {
+          id: item.id,
+          topicId,
+          prompt,
+          options: validOptions,
+          correctIndex,
+          explanation,
+          sourceTitle: item.sourceTitle,
+          sourceUrl: item.sourceUrl,
+        }
+      })
+      publishedQuestionsLoaded = true
+      return publishedAdminQuestions
+    })
+    .finally(() => {
+      publishedQuestionLoad = null
+    })
+  return publishedQuestionLoad
 }
 
 export const TOPIC_PRACTICE_QUESTIONS: TopicPracticeQuestion[] = [
@@ -75,4 +137,7 @@ export const TOPIC_PRACTICE_QUESTIONS: TopicPracticeQuestion[] = [
 ]
 
 export const getTopicPracticeQuestions = (topicId: string) =>
-  TOPIC_PRACTICE_QUESTIONS.filter((question) => question.topicId === topicId)
+  [
+    ...TOPIC_PRACTICE_QUESTIONS.filter((question) => question.topicId === topicId),
+    ...publishedAdminQuestions.filter((question) => question.topicId === topicId),
+  ]

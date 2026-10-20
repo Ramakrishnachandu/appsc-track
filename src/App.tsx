@@ -7,15 +7,18 @@ import { AuthShell } from './components/AuthShell'
 import { PageHeader } from './components/PageHeader'
 import {
   AdminPage,
+  AdminOperationsPage,
   AnalyticsPage,
   DashboardPage,
   MockTestsPage,
   NotesPage,
   PracticePage,
   RevisionPage,
+  ResourcesPage,
   SettingsPage,
   StudyPlanPage,
   SubjectsPage,
+  SupportPage,
 } from './pages'
 import './App.css'
 import { useAppStore } from './store/useAppStore'
@@ -161,6 +164,8 @@ function App() {
     if (location.pathname === '/revision') return 'Revision'
     if (location.pathname === '/analytics') return 'Analytics'
     if (location.pathname === '/notes') return 'Notes'
+    if (location.pathname === '/resources') return 'Notices & Resources'
+    if (location.pathname === '/support') return 'Help & Support'
     if (location.pathname === '/settings') return 'Settings'
     return 'Dashboard'
   })()
@@ -258,10 +263,17 @@ function App() {
             <Route path="/revision" element={<RevisionPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/notes" element={<NotesPage />} />
+            <Route path="/resources" element={<ResourcesPage />} />
+            <Route path="/support" element={<SupportPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/admin" element={user.role === 'admin' ? <Navigate to="/admin/content" replace /> : <Navigate to="/dashboard" replace />} />
             <Route path="/admin/content" element={user.role === 'admin' ? <AdminPage initialSection="content" /> : <Navigate to="/dashboard" replace />} />
             <Route path="/admin/mock-tests" element={user.role === 'admin' ? <AdminPage initialSection="mock" /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/admin/operations" element={user.role === 'admin' ? <AdminOperationsPage key="overview" /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/admin/questions" element={user.role === 'admin' ? <AdminOperationsPage key="questions" /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/admin/notices" element={user.role === 'admin' ? <AdminOperationsPage key="notices" /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/admin/resources" element={user.role === 'admin' ? <AdminOperationsPage key="resources" /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/admin/support" element={user.role === 'admin' ? <AdminOperationsPage key="support" /> : <Navigate to="/dashboard" replace />} />
             <Route path="/admin/mock" element={user.role === 'admin' ? <Navigate to="/admin/mock-tests" replace /> : <Navigate to="/dashboard" replace />} />
             <Route
               path="/admin/*"

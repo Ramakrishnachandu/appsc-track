@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Alert, Box, Button, MenuItem, TextField } from '@mui/material'
 import { getCurrentGroup2Syllabus } from '../data/group2Syllabus'
-import { getTopicPracticeQuestions } from '../data/topicPracticeQuestions'
+import { getTopicPracticeQuestions, refreshPublishedAdminPracticeQuestions } from '../data/topicPracticeQuestions'
 import { getTopicProgress } from '../lib/studyPlanner'
 import { useStudyPlanStore } from '../store/useStudyPlanStore'
 
@@ -10,7 +10,24 @@ export function PracticePage() {
   const navigate = useNavigate()
   const plan = useStudyPlanStore((state) => state.plan)
   const [paperId, setPaperId] = useState('all')
+  const [contentError, setContentError] = useState('')
+  const [, setContentLoaded] = useState(false)
   const syllabus = getCurrentGroup2Syllabus()
+
+  useEffect(() => {
+    let active = true
+    void refreshPublishedAdminPracticeQuestions()
+      .then(() => {
+        if (active) {
+          setContentError('')
+          setContentLoaded((value) => !value)
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) setContentError(error instanceof Error ? error.message : 'Unable to load published practice questions.')
+      })
+    return () => { active = false }
+  }, [])
   const questionTopics = syllabus.flatMap((paper) => paper.subjects.flatMap((subject) => subject.units.flatMap((unit) => unit.topics)))
     .map((topic) => ({
       topic,
@@ -39,7 +56,8 @@ export function PracticePage() {
         </TextField>
       </div>
 
-      <Alert severity="info">These are original planner practice questions, not verified previous-year questions or official APPSC questions. In-app answer accuracy is for study guidance, not official exam scoring.</Alert>
+      <Alert severity="info">Questions support study practice and are not official APPSC questions or verified previous-year questions unless the cited source says so. In-app answer accuracy is guidance, not official exam scoring.</Alert>
+      {contentError && <Alert severity="error" sx={{ mt: 1 }}>Published question-bank content could not be loaded: {contentError}</Alert>}
 
       <div className="practice-live-metrics">
         <div><span>Answers saved</span><strong>{attempts.length}</strong></div>
@@ -59,7 +77,7 @@ export function PracticePage() {
               <div className="practice-topic-copy">
                 <span>{paper?.title}</span>
                 <h2>{topic.title}</h2>
-                <p>{subject?.title} / {questions.length} original practice questions</p>
+                <p>{subject?.title} / {questions.length} practice questions</p>
               </div>
               <div className="practice-topic-result">
                 <span>{topicAttempts.length ? `${topicAccuracy}% accuracy` : 'Not attempted'}</span>
